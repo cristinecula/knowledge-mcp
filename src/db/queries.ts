@@ -342,6 +342,29 @@ export function getOutgoingLinks(
   return rows.map(rowToLink);
 }
 
+export function getIncomingLinks(
+  entryId: string,
+  linkTypes?: LinkType[],
+): KnowledgeLink[] {
+  const db = getDb();
+
+  if (linkTypes && linkTypes.length > 0) {
+    const placeholders = linkTypes.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT * FROM knowledge_links WHERE target_id = ? AND link_type IN (${placeholders})`,
+      )
+      .all(entryId, ...linkTypes) as KnowledgeLinkRow[];
+    return rows.map(rowToLink);
+  }
+
+  const rows = db
+    .prepare('SELECT * FROM knowledge_links WHERE target_id = ?')
+    .all(entryId) as KnowledgeLinkRow[];
+
+  return rows.map(rowToLink);
+}
+
 export function getLinkedEntries(entryId: string): KnowledgeEntry[] {
   const db = getDb();
   const rows = db

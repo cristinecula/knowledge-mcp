@@ -4,7 +4,7 @@ import { KNOWLEDGE_TYPES, SCOPES, REVALIDATION_LINK_TYPES } from '../types.js';
 import {
   getKnowledgeById,
   updateKnowledgeFields,
-  getOutgoingLinks,
+  getIncomingLinks,
   updateStatus,
 } from '../db/queries.js';
 
@@ -65,19 +65,21 @@ export function registerUpdateTool(server: McpServer): void {
           scope,
         });
 
-        // Cascade revalidation: flag derived/dependent entries
+        // Cascade revalidation: flag entries that derived from or depend on the updated entry.
+        // These are entries where the updated entry is the TARGET of a derived/depends link
+        // (i.e., other entries point at this one saying "I depend on / am derived from this").
         const revalidatedIds: string[] = [];
-        const outgoingLinks = getOutgoingLinks(id, REVALIDATION_LINK_TYPES);
+        const incomingLinks = getIncomingLinks(id, REVALIDATION_LINK_TYPES);
 
-        for (const link of outgoingLinks) {
-          const targetEntry = getKnowledgeById(link.target_id);
+        for (const link of incomingLinks) {
+          const dependentEntry = getKnowledgeById(link.source_id);
           if (
-            targetEntry &&
-            targetEntry.status !== 'deprecated' &&
-            targetEntry.status !== 'dormant'
+            dependentEntry &&
+            dependentEntry.status !== 'deprecated' &&
+            dependentEntry.status !== 'dormant'
           ) {
-            updateStatus(link.target_id, 'needs_revalidation');
-            revalidatedIds.push(link.target_id);
+            updateStatus(link.source_id, 'needs_revalidation');
+            revalidatedIds.push(link.source_id);
           }
         }
 
