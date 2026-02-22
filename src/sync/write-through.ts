@@ -17,7 +17,6 @@ import {
   ensureRepoStructure,
 } from './fs.js';
 import { resolveRepoForScope } from './routing.js';
-import { updateSyncedAt } from '../db/queries.js';
 import type { KnowledgeEntry, KnowledgeLink, KnowledgeType } from '../types.js';
 
 /**
@@ -72,9 +71,13 @@ export function syncWriteEntry(
     }
 
     // 4. Write new JSON file
+    // NOTE: Do NOT call updateSyncedAt here. synced_at tracks when the entry
+    // was last reconciled with the remote (import or push). Write-through puts
+    // the file on disk but it hasn't been pushed yet. Updating synced_at here
+    // would cause detectConflict to miss local changes (content_updated_at
+    // would equal synced_at, so localChanged would be false).
     const json = entryToJSON(entry);
     writeEntryFile(repoPath, json);
-    updateSyncedAt(entry.id);
     touchedRepos.add(repoPath);
 
   } catch (error) {

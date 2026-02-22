@@ -100,6 +100,16 @@ export function gitCommitAll(path: string, message: string): boolean {
   }
 }
 
+/** Check if the local repo has any commits. */
+function hasLocalCommits(path: string): boolean {
+  try {
+    execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Pull changes from remote. Skips if no remote or if remote is empty. */
 export function gitPull(path: string, remote = 'origin'): boolean {
   if (!hasRemote(path, remote)) return false;
@@ -114,6 +124,7 @@ export function gitPull(path: string, remote = 'origin'): boolean {
     }
 
     // Check if the remote has any branches — skip pull on empty repos
+    let remoteBranch: string;
     try {
       const refs = execFileSync('git', ['ls-remote', '--heads', remote], {
         cwd: path,
@@ -123,11 +134,65 @@ export function gitPull(path: string, remote = 'origin'): boolean {
         // Remote has no branches yet (empty repo) — nothing to pull
         return false;
       }
+      // Extract the first branch name (e.g., "refs/heads/master" -> "master")
+      const match = refs.match(/refs\/heads\/(\S+)/);
+      remoteBranch = match ? match[1] : 'master';
     } catch {
       return false;
     }
 
-    execFileSync('git', ['pull', remote], { cwd: path, stdio: 'pipe' });
+    if (!hasLocalCommits(path)) {
+      // Local repo has no commits (e.g., empty clone where ensureRepoStructure
+      // created untracked files). Use checkout to adopt the remote branch
+      // instead of pull, which would fail on untracked file conflicts.
+      try {
+        // Clean up any untracked files that might conflict
+        execFileSync('git', ['clean', '-fd'], { cwd: path, stdio: 'pipe' });
+        execFileSync('git', ['checkout', '-B', remoteBranch, `${remote}/${remoteBranch}`], {
+          cwd: path,
+          stdio: 'pipe',
+        });
+      } catch (checkoutError) {
+        console.error(`Git checkout from remote failed for ${path}:`, checkoutError);
+        return false;
+      }
+    } else {
+      // Use --no-rebase to merge (not rebase) and --allow-unrelated-histories
+      // to handle the case where both sides created independent root commits
+      // (e.g., both agents cloned an empty remote and committed independently).
+      try {
+        execFileSync(
+          'git',
+          ['pull', '--no-rebase', '--allow-unrelated-histories', remote, remoteBranch],
+          { cwd: path, stdio: 'pipe' },
+        );
+      } catch {
+        // Pull failed — likely a merge conflict. For knowledge sync, we resolve
+        // git-level conflicts by accepting the REMOTE version of all conflicting
+        // files. The application-level merge logic in pull() will then see the
+        // remote content on disk and the local content in the DB, and correctly
+        // detect and handle conflicts (creating [Sync Conflict] entries).
+        try {
+          // Check if we're in a merge state
+          execFileSync('git', ['rev-parse', 'MERGE_HEAD'], { cwd: path, stdio: 'ignore' });
+
+          // Accept "theirs" (remote) for all conflicting files
+          execFileSync('git', ['checkout', '--theirs', '.'], { cwd: path, stdio: 'pipe' });
+          execFileSync('git', ['add', '-A'], { cwd: path, stdio: 'pipe' });
+          execFileSync('git', ['commit', '--no-edit'], { cwd: path, stdio: 'pipe' });
+        } catch (mergeError) {
+          // If we can't resolve, abort the merge to leave repo in clean state
+          try {
+            execFileSync('git', ['merge', '--abort'], { cwd: path, stdio: 'ignore' });
+          } catch {
+            // Already clean
+          }
+          console.error(`Git pull merge conflict resolution failed for ${path}:`, mergeError);
+          return false;
+        }
+      }
+    }
+
     return true;
   } catch (error) {
     console.error(`Git pull failed for ${path}:`, error);

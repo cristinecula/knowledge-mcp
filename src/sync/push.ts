@@ -196,11 +196,21 @@ export function push(config: import('./routing.js').SyncConfig): PushResult {
 
   // === Commit and Push ===
 
-  for (const repoPath of touchedRepos) {
-    // Commit any remaining changes (may be a no-op if write-through already committed)
-    gitCommitAll(repoPath, 'knowledge: sync push');
+  // Push ALL configured repos, not just touched ones. Write-through may have
+  // created commits (e.g., store or delete) that haven't been pushed yet.
+  // If we only push touchedRepos, deletions that were already committed by
+  // write-through (and thus didn't touch the repo during push()) would never
+  // be pushed to the remote.
+  for (const repo of config.repos) {
+    if (!existsSync(repo.path)) continue;
+
+    // Commit any remaining changes in touched repos
+    if (touchedRepos.has(repo.path)) {
+      gitCommitAll(repo.path, 'knowledge: sync push');
+    }
+
     // Always push — there may be unpushed write-through commits
-    gitPush(repoPath);
+    gitPush(repo.path);
   }
 
   return result;
