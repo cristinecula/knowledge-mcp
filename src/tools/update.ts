@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { updateKnowledgeFields, getKnowledgeById } from '../db/queries.js';
+import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, updateStatus } from '../db/queries.js';
 import { syncWriteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
-import { KNOWLEDGE_TYPES, SCOPES } from '../types.js';
+import { KNOWLEDGE_TYPES, SCOPES, REVALIDATION_LINK_TYPES } from '../types.js';
+import { embedAndStore } from '../embeddings/similarity.js';
 
 export function registerUpdateTool(server: McpServer): void {
   server.registerTool(
@@ -51,11 +52,36 @@ export function registerUpdateTool(server: McpServer): void {
           }
           clearTouchedRepos();
 
+          // Regenerate embedding if content-affecting fields changed (non-fatal)
+          if (title !== undefined || content !== undefined || tags !== undefined) {
+            try {
+              await embedAndStore(updated.id, updated.title, updated.content, updated.tags);
+            } catch {
+              // Embedding generation can fail (e.g., no provider configured)
+            }
+          }
+
+          // Cascade revalidation: flag entries linked via 'derived' or 'depends'
+          const revalidated: string[] = [];
+          const incomingLinks = getIncomingLinks(id, REVALIDATION_LINK_TYPES);
+          for (const link of incomingLinks) {
+            const linkedEntry = getKnowledgeById(link.source_id);
+            if (linkedEntry && linkedEntry.status !== 'deprecated' && linkedEntry.status !== 'dormant') {
+              updateStatus(link.source_id, 'needs_revalidation');
+              revalidated.push(link.source_id);
+            }
+          }
+
+          let responseText = `Updated knowledge entry: ${updated.title} (ID: ${id})`;
+          if (revalidated.length > 0) {
+            responseText += `\n\nCascade revalidation: flagged ${revalidated.length} linked entries as needs_revalidation:\n${revalidated.map((rid) => `  - ${rid}`).join('\n')}`;
+          }
+
           return {
             content: [
               {
                 type: 'text',
-                text: `Updated knowledge entry: ${updated.title} (ID: ${id})`,
+                text: responseText,
               },
             ],
           };

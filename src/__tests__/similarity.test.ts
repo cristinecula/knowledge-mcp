@@ -21,6 +21,7 @@ function mockEntry(id: string, title: string = 'Test'): KnowledgeEntry {
     strength: 1.0,
     status: 'active',
     synced_at: null,
+    deprecation_reason: null,
   };
 }
 

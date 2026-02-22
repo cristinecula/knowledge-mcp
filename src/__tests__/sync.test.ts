@@ -17,6 +17,7 @@ import {
   updateKnowledgeFields,
   updateSyncedAt,
   updateKnowledgeContent,
+  deprecateKnowledge,
   deleteKnowledge,
   deleteLink,
   importKnowledge,
@@ -873,6 +874,126 @@ describe('sync layer', () => {
     it('should have synced_at as null on new entries', () => {
       const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
       expect(entry.synced_at).toBeNull();
+    });
+  });
+
+  describe('deprecation_reason serialization', () => {
+    it('should include deprecation_reason in entryToJSON when set', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Old fact', content: 'outdated' });
+      const deprecated = deprecateKnowledge(entry.id, 'Superseded by new research');
+
+      const json = entryToJSON(deprecated!);
+      expect(json.deprecation_reason).toBe('Superseded by new research');
+      expect(json.status).toBe('deprecated');
+    });
+
+    it('should omit deprecation_reason in entryToJSON when null', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Active fact', content: 'current' });
+
+      const json = entryToJSON(entry);
+      expect(json.deprecation_reason).toBeUndefined();
+    });
+
+    it('should parse deprecation_reason from entry JSON', () => {
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000099',
+        type: 'fact',
+        title: 'Parsed entry',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'deprecated',
+        deprecation_reason: 'No longer relevant',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const parsed = parseEntryJSON(raw);
+      expect(parsed.deprecation_reason).toBe('No longer relevant');
+      expect(parsed.status).toBe('deprecated');
+    });
+
+    it('should handle missing deprecation_reason in parsed JSON', () => {
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000098',
+        type: 'fact',
+        title: 'No reason entry',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const parsed = parseEntryJSON(raw);
+      expect(parsed.deprecation_reason).toBeUndefined();
+    });
+
+    it('should round-trip deprecation_reason through serialize/deserialize', () => {
+      const entry = insertKnowledge({ type: 'decision', title: 'Old decision', content: 'We chose X' });
+      const deprecated = deprecateKnowledge(entry.id, 'X was sunset, migrated to Y');
+
+      const json = entryToJSON(deprecated!);
+      const parsed = parseEntryJSON(json);
+
+      expect(parsed.deprecation_reason).toBe('X was sunset, migrated to Y');
+      expect(parsed.status).toBe('deprecated');
+    });
+
+    it('should write and read deprecation_reason through file sync', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Deprecated via file', content: 'stuff' });
+      const deprecated = deprecateKnowledge(entry.id, 'Moved to docs');
+
+      // Write to file
+      ensureRepoStructure(repoPath);
+      writeEntryFile(repoPath, deprecated!);
+
+      // Read file back
+      const filePath = join(repoPath, 'entries', 'fact', `${entry.id}.json`);
+      const fileContent = JSON.parse(readFileSync(filePath, 'utf-8'));
+      expect(fileContent.deprecation_reason).toBe('Moved to docs');
+      expect(fileContent.status).toBe('deprecated');
+    });
+
+    it('should import deprecation_reason during pull', async () => {
+      ensureRepoStructure(repoPath);
+      gitCommitAll(repoPath, 'init structure');
+
+      const entryId = '00000000-0000-4000-a000-000000000097';
+      const entryJSON: EntryJSON = {
+        id: entryId,
+        type: 'convention',
+        title: 'Deprecated convention',
+        content: 'Old way of doing things',
+        tags: ['old'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'deprecated',
+        deprecation_reason: 'Replaced by automated linting',
+        created_at: '2025-01-01T00:00:00.000Z',
+        updated_at: '2025-01-02T00:00:00.000Z',
+      };
+
+      // Write entry file to repo
+      const entryDir = join(repoPath, 'entries', 'convention');
+      mkdirSync(entryDir, { recursive: true });
+      writeFileSync(join(entryDir, `${entryId}.json`), JSON.stringify(entryJSON));
+      gitCommitAll(repoPath, 'add deprecated entry');
+
+      // Pull
+      const result = await pull(config);
+      expect(result.new_entries).toBe(1);
+
+      const imported = getKnowledgeById(entryId);
+      expect(imported).not.toBeNull();
+      expect(imported!.status).toBe('deprecated');
+      expect(imported!.deprecation_reason).toBe('Replaced by automated linting');
     });
   });
 });

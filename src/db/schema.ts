@@ -22,7 +22,8 @@ export function initSchema(db: Database.Database): void {
       access_count INTEGER NOT NULL DEFAULT 0,
       strength REAL NOT NULL DEFAULT 1.0,
       status TEXT NOT NULL DEFAULT 'active',
-      synced_at TEXT
+      synced_at TEXT,
+      deprecation_reason TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_type ON knowledge(type);
@@ -122,6 +123,11 @@ function migrateSchema(db: Database.Database): void {
   // Migration 2: Add synced_at column
   if (!columnNames.has('synced_at')) {
     db.exec(`ALTER TABLE knowledge ADD COLUMN synced_at TEXT`);
+  }
+
+  // Migration 3: Add deprecation_reason column
+  if (!columnNames.has('deprecation_reason')) {
+    db.exec(`ALTER TABLE knowledge ADD COLUMN deprecation_reason TEXT`);
   }
 
   // Backfill: ensure content_updated_at is set for any rows where it's empty

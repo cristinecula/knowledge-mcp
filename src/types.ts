@@ -61,6 +61,7 @@ export interface KnowledgeEntry {
   strength: number;
   status: Status;
   synced_at: string | null;
+  deprecation_reason: string | null;
 }
 
 /** Row shape as stored in SQLite (tags is a JSON string) */
@@ -81,6 +82,7 @@ export interface KnowledgeRow {
   strength: number;
   status: string;
   synced_at: string | null;
+  deprecation_reason: string | null;
 }
 
 export interface KnowledgeLink {

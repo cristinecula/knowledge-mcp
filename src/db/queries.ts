@@ -131,14 +131,15 @@ export function updateStatus(id: string, status: Status): void {
 
 /**
  * Deprecate a knowledge entry by setting its status to 'deprecated'.
+ * Optionally stores the reason for deprecation.
  * Returns the updated entry, or null if not found.
  */
-export function deprecateKnowledge(id: string): KnowledgeEntry | null {
+export function deprecateKnowledge(id: string, reason?: string): KnowledgeEntry | null {
   const db = getDb();
   const now = new Date().toISOString();
   const result = db.prepare(
-    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ? WHERE id = ?',
-  ).run('deprecated', now, now, id);
+    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ?, deprecation_reason = ? WHERE id = ?',
+  ).run('deprecated', now, now, reason ?? null, id);
   if (result.changes === 0) return null;
   return getKnowledgeById(id);
 }
@@ -553,6 +554,7 @@ export interface ImportKnowledgeParams {
   scope?: Scope;
   source?: string;
   status?: Status;
+  deprecation_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -562,8 +564,8 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?)
   `);
 
   stmt.run(
@@ -581,6 +583,7 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
     now,                  // last_accessed_at = now (personal)
     params.status ?? 'active',
     now,                  // synced_at = now
+    params.deprecation_reason ?? null,
   );
 
   return getKnowledgeById(params.id)!;
@@ -637,6 +640,7 @@ export function updateKnowledgeContent(
     source?: string;
     status?: Status;
     updated_at?: string;
+    deprecation_reason?: string | null;
   },
 ): KnowledgeEntry | null {
   const db = getDb();
@@ -680,6 +684,10 @@ export function updateKnowledgeContent(
   if (fields.updated_at !== undefined) {
     sets.push('updated_at = ?');
     values.push(fields.updated_at);
+  }
+  if (fields.deprecation_reason !== undefined) {
+    sets.push('deprecation_reason = ?');
+    values.push(fields.deprecation_reason);
   }
 
   values.push(id);

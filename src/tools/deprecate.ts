@@ -19,7 +19,7 @@ export function registerDeprecateTool(server: McpServer): void {
     },
     async ({ id, reason }) => {
       try {
-        const deprecated = deprecateKnowledge(id);
+        const deprecated = deprecateKnowledge(id, reason);
         if (deprecated) {
           syncWriteEntry(deprecated);
           
@@ -32,7 +32,7 @@ export function registerDeprecateTool(server: McpServer): void {
             content: [
               {
                 type: 'text',
-                text: `Deprecated knowledge entry: ${deprecated.title} (ID: ${id})`,
+                text: `Deprecated knowledge entry: ${deprecated.title} (ID: ${id})\nReason: ${reason}`,
               },
             ],
           };

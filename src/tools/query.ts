@@ -100,7 +100,7 @@ export function registerQueryTool(server: McpServer): void {
         // Enrich with link info
         const results = finalEntries.map((entry) => {
           const links = getLinksForEntry(entry.id);
-          return {
+          const result: Record<string, unknown> = {
             id: entry.id,
             type: entry.type,
             title: entry.title,
@@ -121,6 +121,10 @@ export function registerQueryTool(server: McpServer): void {
               direction: l.source_id === entry.id ? 'outgoing' : 'incoming',
             })),
           };
+          if (entry.deprecation_reason) {
+            result.deprecation_reason = entry.deprecation_reason;
+          }
+          return result;
         });
 
         return {

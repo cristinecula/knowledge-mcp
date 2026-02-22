@@ -43,6 +43,7 @@ export interface EntryJSON {
   scope: Scope;
   source: string;
   status: Status;
+  deprecation_reason?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -63,7 +64,7 @@ export interface LinkJSON {
  * Strips local-only fields (strength, access_count, etc.).
  */
 export function entryToJSON(entry: KnowledgeEntry): EntryJSON {
-  return {
+  const json: EntryJSON = {
     id: entry.id,
     type: entry.type,
     title: entry.title,
@@ -76,6 +77,13 @@ export function entryToJSON(entry: KnowledgeEntry): EntryJSON {
     created_at: entry.created_at,
     updated_at: entry.content_updated_at || entry.updated_at,
   };
+
+  // Only include deprecation_reason when it has a value (keep JSON clean)
+  if (entry.deprecation_reason) {
+    json.deprecation_reason = entry.deprecation_reason;
+  }
+
+  return json;
 }
 
 /**
@@ -141,7 +149,10 @@ export function parseEntryJSON(data: unknown): EntryJSON {
   // Source must be a string (default to 'unknown')
   const source = typeof obj.source === 'string' ? obj.source : 'unknown';
 
-  return {
+  // Deprecation reason must be a string or null/undefined
+  const deprecation_reason = typeof obj.deprecation_reason === 'string' ? obj.deprecation_reason : null;
+
+  const result: EntryJSON = {
     id: obj.id,
     type: obj.type as KnowledgeType,
     title: obj.title,
@@ -154,6 +165,13 @@ export function parseEntryJSON(data: unknown): EntryJSON {
     created_at: obj.created_at,
     updated_at: obj.updated_at,
   };
+
+  // Only include deprecation_reason when it has a value
+  if (deprecation_reason) {
+    result.deprecation_reason = deprecation_reason;
+  }
+
+  return result;
 }
 
 /**

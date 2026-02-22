@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { insertKnowledge, insertLink } from '../db/queries.js';
 import { syncWriteEntry, syncWriteLink, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, LINK_TYPES, SCOPES } from '../types.js';
+import { embedAndStore } from '../embeddings/similarity.js';
 
 export function registerStoreTool(server: McpServer): void {
   server.registerTool(
@@ -52,6 +53,13 @@ export function registerStoreTool(server: McpServer): void {
           source: source || 'agent',
         });
         syncWriteEntry(entry);
+
+        // Generate embedding for the new entry (non-fatal)
+        try {
+          await embedAndStore(entry.id, entry.title, entry.content, entry.tags);
+        } catch {
+          // Embedding generation can fail (e.g., no provider configured)
+        }
 
         if (links && links.length > 0) {
           for (const link of links) {

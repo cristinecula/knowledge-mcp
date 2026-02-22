@@ -52,19 +52,25 @@ export function registerListTool(server: McpServer): void {
           };
         }
 
-        const results = entries.map((entry) => ({
-          id: entry.id,
-          type: entry.type,
-          title: entry.title,
-          tags: entry.tags,
-          project: entry.project,
-          scope: entry.scope,
-          strength: Math.round(entry.strength * 1000) / 1000,
-          status: entry.status,
-          access_count: entry.access_count,
-          created_at: entry.created_at,
-          last_accessed_at: entry.last_accessed_at,
-        }));
+        const results = entries.map((entry) => {
+          const result: Record<string, unknown> = {
+            id: entry.id,
+            type: entry.type,
+            title: entry.title,
+            tags: entry.tags,
+            project: entry.project,
+            scope: entry.scope,
+            strength: Math.round(entry.strength * 1000) / 1000,
+            status: entry.status,
+            access_count: entry.access_count,
+            created_at: entry.created_at,
+            last_accessed_at: entry.last_accessed_at,
+          };
+          if (entry.deprecation_reason) {
+            result.deprecation_reason = entry.deprecation_reason;
+          }
+          return result;
+        });
 
         return {
           content: [

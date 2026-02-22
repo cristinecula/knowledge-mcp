@@ -21,6 +21,7 @@ import {
   recordAccess,
   updateStatus,
   updateKnowledgeFields,
+  deprecateKnowledge,
   deleteKnowledge,
   storeEmbedding,
   getEmbedding,
@@ -498,5 +499,66 @@ describe('delete workflow', () => {
 
     expect(getKnowledgeById(a.id)).not.toBeNull();
     expect(getKnowledgeById(b.id)).toBeNull();
+  });
+});
+
+// === Deprecation reason ===
+
+describe('deprecation reason', () => {
+  it('should store deprecation reason when deprecating', () => {
+    const entry = insertKnowledge({
+      type: 'fact',
+      title: 'Old approach',
+      content: 'We used to do it this way',
+    });
+
+    const deprecated = deprecateKnowledge(entry.id, 'Replaced by new approach');
+
+    expect(deprecated).not.toBeNull();
+    expect(deprecated!.status).toBe('deprecated');
+    expect(deprecated!.deprecation_reason).toBe('Replaced by new approach');
+  });
+
+  it('should store null deprecation_reason when no reason provided', () => {
+    const entry = insertKnowledge({
+      type: 'fact',
+      title: 'Old fact',
+      content: 'Some old fact',
+    });
+
+    const deprecated = deprecateKnowledge(entry.id);
+
+    expect(deprecated).not.toBeNull();
+    expect(deprecated!.status).toBe('deprecated');
+    expect(deprecated!.deprecation_reason).toBeNull();
+  });
+
+  it('should have null deprecation_reason on new entries', () => {
+    const entry = insertKnowledge({
+      type: 'convention',
+      title: 'New convention',
+      content: 'Do it this way',
+    });
+
+    expect(entry.deprecation_reason).toBeNull();
+  });
+
+  it('should return deprecation_reason via getKnowledgeById', () => {
+    const entry = insertKnowledge({
+      type: 'decision',
+      title: 'Old decision',
+      content: 'We decided X',
+    });
+
+    deprecateKnowledge(entry.id, 'Decision reversed in Q3 review');
+    const fetched = getKnowledgeById(entry.id);
+
+    expect(fetched).not.toBeNull();
+    expect(fetched!.deprecation_reason).toBe('Decision reversed in Q3 review');
+  });
+
+  it('should return null when entry not found', () => {
+    const result = deprecateKnowledge('00000000-0000-0000-0000-000000000000', 'Does not exist');
+    expect(result).toBeNull();
   });
 });
