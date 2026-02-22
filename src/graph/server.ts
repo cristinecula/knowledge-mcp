@@ -23,7 +23,7 @@ export function startGraphServer(port: number = 3333): Promise<number> {
       }
     });
 
-    server.listen(port, () => {
+    server.listen(port, '127.0.0.1', () => {
       console.error(
         `Knowledge graph visualization: http://localhost:${port}`,
       );
