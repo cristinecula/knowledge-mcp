@@ -100,7 +100,7 @@ export function gitCommitAll(path: string, message: string): boolean {
   }
 }
 
-/** Pull changes from remote. Skips if no remote. */
+/** Pull changes from remote. Skips if no remote or if remote is empty. */
 export function gitPull(path: string, remote = 'origin'): boolean {
   if (!hasRemote(path, remote)) return false;
 
@@ -109,7 +109,22 @@ export function gitPull(path: string, remote = 'origin'): boolean {
     try {
       execFileSync('git', ['fetch', remote], { cwd: path, stdio: 'ignore' });
     } catch {
-      // Fetch might fail if repo is empty or no network, but pull handles that
+      // Fetch might fail if repo is empty or no network
+      return false;
+    }
+
+    // Check if the remote has any branches — skip pull on empty repos
+    try {
+      const refs = execFileSync('git', ['ls-remote', '--heads', remote], {
+        cwd: path,
+        encoding: 'utf-8',
+      }).trim();
+      if (!refs) {
+        // Remote has no branches yet (empty repo) — nothing to pull
+        return false;
+      }
+    } catch {
+      return false;
     }
 
     execFileSync('git', ['pull', remote], { cwd: path, stdio: 'pipe' });
