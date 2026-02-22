@@ -360,6 +360,95 @@ describe('link workflow', () => {
   });
 });
 
+// === Supersedes revalidation workflow ===
+
+describe('supersedes revalidation workflow', () => {
+  it('should flag target as needs_revalidation when supersedes link is created', () => {
+    const old = insertKnowledge({
+      type: 'decision',
+      title: 'Use Preact Signals',
+      content: 'We use Preact Signals for state management',
+    });
+
+    const replacement = insertKnowledge({
+      type: 'decision',
+      title: 'Use Pion Contexts',
+      content: 'We now use Pion Contexts instead of Preact Signals',
+    });
+
+    // Simulate link_knowledge tool: create supersedes link and flag target
+    insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
+
+    const target = getKnowledgeById(old.id)!;
+    if (target.status !== 'deprecated' && target.status !== 'dormant') {
+      updateStatus(old.id, 'needs_revalidation');
+    }
+
+    expect(getKnowledgeById(old.id)!.status).toBe('needs_revalidation');
+    // The superseding entry should remain active
+    expect(getKnowledgeById(replacement.id)!.status).toBe('active');
+  });
+
+  it('should flag target when supersedes link is created inline via store', () => {
+    const old = insertKnowledge({
+      type: 'convention',
+      title: 'Use REST API',
+      content: 'We use REST endpoints',
+    });
+
+    // Simulate store_knowledge with inline supersedes link
+    const replacement = insertKnowledge({
+      type: 'convention',
+      title: 'Use GraphQL API',
+      content: 'We now use GraphQL instead of REST',
+    });
+
+    insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
+
+    const target = getKnowledgeById(old.id)!;
+    if (target.status !== 'deprecated' && target.status !== 'dormant') {
+      updateStatus(old.id, 'needs_revalidation');
+    }
+
+    expect(getKnowledgeById(old.id)!.status).toBe('needs_revalidation');
+  });
+
+  it('should NOT flag deprecated targets when superseded', () => {
+    const old = insertKnowledge({
+      type: 'decision',
+      title: 'Old decision',
+      content: 'Already deprecated',
+    });
+    updateStatus(old.id, 'deprecated');
+
+    const replacement = insertKnowledge({
+      type: 'decision',
+      title: 'New decision',
+      content: 'Replacement',
+    });
+
+    insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
+
+    const target = getKnowledgeById(old.id)!;
+    if (target.status !== 'deprecated' && target.status !== 'dormant') {
+      updateStatus(old.id, 'needs_revalidation');
+    }
+
+    // Should still be deprecated, not changed to needs_revalidation
+    expect(getKnowledgeById(old.id)!.status).toBe('deprecated');
+  });
+
+  it('should NOT flag target for non-supersedes link types', () => {
+    const a = insertKnowledge({ type: 'fact', title: 'Fact A', content: 'content a' });
+    const b = insertKnowledge({ type: 'fact', title: 'Fact B', content: 'content b' });
+
+    insertLink({ sourceId: b.id, targetId: a.id, linkType: 'related' });
+
+    // related links should NOT trigger revalidation
+    expect(getKnowledgeById(a.id)!.status).toBe('active');
+  });
+});
+
 // === Delete workflow ===
 
 describe('delete workflow', () => {

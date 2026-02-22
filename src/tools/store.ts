@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { KNOWLEDGE_TYPES, SCOPES, LINK_TYPES } from '../types.js';
-import { insertKnowledge, insertLink, getKnowledgeById } from '../db/queries.js';
+import { insertKnowledge, insertLink, getKnowledgeById, updateStatus } from '../db/queries.js';
 import { embedAndStore } from '../embeddings/similarity.js';
 
 export function registerStoreTool(server: McpServer): void {
@@ -12,7 +12,8 @@ export function registerStoreTool(server: McpServer): void {
         'Store a new piece of knowledge in the shared knowledge base. ' +
         'Knowledge can be conventions, decisions, patterns, pitfalls, facts, debug notes, or process documentation. ' +
         'Entries start with full strength (1.0) and will naturally decay over time unless accessed. ' +
-        'Optionally link this entry to existing entries.',
+        'Optionally link this entry to existing entries. ' +
+        'If a "supersedes" link is included, the target entry is automatically flagged as "needs_revalidation".',
       inputSchema: {
         title: z.string().describe('Short summary of the knowledge (1-2 sentences)'),
         content: z.string().describe('Full content in markdown format'),
@@ -73,10 +74,24 @@ export function registerStoreTool(server: McpServer): void {
               description: link.description,
               source: source ?? 'unknown',
             });
+
+            // Flag target for revalidation when superseded
+            let targetRevalidated = false;
+            if (link.link_type === 'supersedes') {
+              if (
+                target.status !== 'deprecated' &&
+                target.status !== 'dormant'
+              ) {
+                updateStatus(link.target_id, 'needs_revalidation');
+                targetRevalidated = true;
+              }
+            }
+
             createdLinks.push({
               link_id: createdLink.id,
               target_id: link.target_id,
               link_type: link.link_type,
+              ...(targetRevalidated && { target_revalidated: true }),
             });
           }
         }

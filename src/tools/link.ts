@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { LINK_TYPES } from '../types.js';
-import { getKnowledgeById, insertLink } from '../db/queries.js';
+import { getKnowledgeById, insertLink, updateStatus } from '../db/queries.js';
 
 export function registerLinkTool(server: McpServer): void {
   server.registerTool(
@@ -13,7 +13,9 @@ export function registerLinkTool(server: McpServer): void {
         'Well-connected knowledge is more robust and harder to forget. ' +
         'Link types: related (general association), derived (deduced from source), ' +
         'depends (requires source to be true), contradicts (conflicts with source), ' +
-        'supersedes (replaces source), elaborates (adds detail to source).',
+        'supersedes (replaces source), elaborates (adds detail to source). ' +
+        'When a "supersedes" link is created, the target entry is automatically flagged ' +
+        'as "needs_revalidation" since it has been replaced.',
       inputSchema: {
         source_id: z.string().describe('ID of the source knowledge entry (the "from" side)'),
         target_id: z.string().describe('ID of the target knowledge entry (the "to" side)'),
@@ -80,12 +82,25 @@ export function registerLinkTool(server: McpServer): void {
           source,
         });
 
+        // Flag target for revalidation when superseded
+        let targetRevalidated = false;
+        if (link_type === 'supersedes') {
+          if (
+            targetEntry.status !== 'deprecated' &&
+            targetEntry.status !== 'dormant'
+          ) {
+            updateStatus(target_id, 'needs_revalidation');
+            targetRevalidated = true;
+          }
+        }
+
         const result: Record<string, unknown> = {
           link_id: link.id,
           source: { id: sourceEntry.id, title: sourceEntry.title },
           target: { id: targetEntry.id, title: targetEntry.title },
           link_type,
           description: description ?? null,
+          ...(targetRevalidated && { target_revalidated: true }),
         };
 
         // Create reverse link if bidirectional
