@@ -34,6 +34,7 @@ import {
   getRepoLinkIds,
   ensureRepoStructure,
 } from './fs.js';
+import { gitPull } from './git.js';
 import type { EntryJSON } from './serialize.js';
 import type { KnowledgeType, LinkType, Scope, Status } from '../types.js';
 
@@ -57,13 +58,7 @@ export interface ConflictDetail {
 /**
  * Pull changes from the sync repo into the local database.
  */
-export async function pull(repoPath: string): Promise<PullResult> {
-  if (!existsSync(repoPath)) {
-    throw new Error(`Sync repo not found: ${repoPath}`);
-  }
-
-  ensureRepoStructure(repoPath);
-
+export async function pull(config: import('./routing.js').SyncConfig): Promise<PullResult> {
   const result: PullResult = {
     new_entries: 0,
     updated: 0,
@@ -74,15 +69,42 @@ export async function pull(repoPath: string): Promise<PullResult> {
     deleted_links: 0,
   };
 
-  // === Pull entries ===
+  // 1. Git pull + read all entries from all repos
+  const remoteEntries = new Map<string, EntryJSON>();
+  const remoteLinks = new Map<string, import('./serialize.js').LinkJSON>();
+  const repoEntryIds = new Set<string>();
+  const repoLinkIds = new Set<string>();
 
-  const remoteEntries = readAllEntryFiles(repoPath);
-  const remoteEntryMap = new Map<string, EntryJSON>();
-  for (const re of remoteEntries) {
-    remoteEntryMap.set(re.id, re);
+  for (const repo of config.repos) {
+    if (!existsSync(repo.path)) continue;
+
+    // Pull remote changes
+    gitPull(repo.path);
+
+    ensureRepoStructure(repo.path);
+
+    // Read entries
+    const entries = readAllEntryFiles(repo.path);
+    for (const entry of entries) {
+      // First repo wins for duplicates (based on config order)
+      if (!remoteEntries.has(entry.id)) {
+        remoteEntries.set(entry.id, entry);
+        repoEntryIds.add(entry.id);
+      }
+    }
+
+    // Read links
+    const links = readAllLinkFiles(repo.path);
+    for (const link of links) {
+      if (!remoteLinks.has(link.id)) {
+        remoteLinks.set(link.id, link);
+        repoLinkIds.add(link.id);
+      }
+    }
   }
 
-  for (const remote of remoteEntries) {
+  // 2. Process entries (new, updated, conflict)
+  for (const remote of remoteEntries.values()) {
     const local = getKnowledgeById(remote.id);
 
     if (!local) {
@@ -156,6 +178,7 @@ export async function pull(repoPath: string): Promise<PullResult> {
         // Keep both versions:
         // 1. Local stays as-is but flagged needs_revalidation
         // 2. Create a new conflict entry with remote content + contradicts link
+        // 3. Flag both as needs_revalidation
 
         // Flag local entry
         if (local.status !== 'deprecated' && local.status !== 'dormant') {
@@ -202,15 +225,12 @@ export async function pull(repoPath: string): Promise<PullResult> {
     }
   }
 
-  // === Detect remote deletions ===
-  // Entries in local DB with synced_at set (previously synced) but not in the repo
-
-  const repoEntryIds = getRepoEntryIds(repoPath);
+  // 3. Detect remote deletions (entries synced before but missing from repo)
   const localEntries = getAllEntries();
 
   for (const local of localEntries) {
     if (local.synced_at && !repoEntryIds.has(local.id)) {
-      // Skip conflict entries — they're local-only and shouldn't be deleted
+      // Skip conflict entries — they're local-only resolution artifacts
       if (local.title.startsWith('[Sync Conflict]')) continue;
 
       deleteKnowledge(local.id);
@@ -218,11 +238,8 @@ export async function pull(repoPath: string): Promise<PullResult> {
     }
   }
 
-  // === Pull links ===
-
-  const remoteLinks = readAllLinkFiles(repoPath);
-
-  for (const remote of remoteLinks) {
+  // 4. Process links (new)
+  for (const remote of remoteLinks.values()) {
     // Check both referenced entries exist locally
     const sourceExists = getKnowledgeById(remote.source_id);
     const targetExists = getKnowledgeById(remote.target_id);
@@ -246,19 +263,16 @@ export async function pull(repoPath: string): Promise<PullResult> {
         result.new_links++;
       }
     } catch {
-      // Skip links that can't be imported (e.g., FK constraint violations)
+      // Skip links that can't be imported (e.g., duplicate or FK issue)
     }
   }
 
-  // === Detect remote link deletions ===
-
-  const repoLinkIds = getRepoLinkIds(repoPath);
+  // 5. Detect remote link deletions
   const localLinks = getAllLinks();
 
   for (const local of localLinks) {
-    // Only delete links that were previously synced (exist in a synced entry context)
-    // We can't track synced_at on links directly, so we check if the link ID was
-    // known to the repo at some point by checking if both its entries are synced
+    // Only delete links that were previously synced (exist in a synced context)
+    // Check if both entries are synced to infer if link was synced
     const sourceEntry = getKnowledgeById(local.source_id);
     const targetEntry = getKnowledgeById(local.target_id);
 

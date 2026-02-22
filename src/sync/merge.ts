@@ -34,21 +34,25 @@ export function detectConflict(
   remote: EntryJSON,
 ): MergeResult {
   const syncedAt = local.synced_at;
+  const contentUpdatedAt = local.content_updated_at;
 
-  // If never synced before, this is a first-time merge.
-  // Compare content to see if they differ.
+  // If never synced before, compare content
   if (!syncedAt) {
     if (contentEquals(local, remote)) {
       return { action: 'no_change' };
     }
-    // Both have content but different — this is a conflict
     return { action: 'conflict' };
   }
 
   // Check if local changed since last sync
-  const localChanged = local.content_updated_at > syncedAt;
+  // content_updated_at is updated when content changes.
+  // If content_updated_at > synced_at, local has changes.
+  const localChanged = contentUpdatedAt ? contentUpdatedAt > syncedAt : false;
 
   // Check if remote changed since last sync
+  // remote.updated_at is the last time remote changed.
+  // If remote.updated_at > synced_at, remote has changes.
+  // Note: we trust remote timestamp to be roughly accurate or at least monotonic
   const remoteChanged = remote.updated_at > syncedAt;
 
   if (!localChanged && !remoteChanged) {
@@ -65,6 +69,8 @@ export function detectConflict(
 
   // Both changed — check if the changes are identical
   if (contentEquals(local, remote)) {
+    // Both changed to the same thing — just update synced_at (handled by no_change logic in pull)
+    // Actually pull logic for no_change just updates synced_at, which is what we want.
     return { action: 'no_change' };
   }
 

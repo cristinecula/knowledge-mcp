@@ -11,7 +11,8 @@ import { readFileSync, writeFileSync, unlinkSync, readdirSync, existsSync, mkdir
 import { resolve, join } from 'node:path';
 import { KNOWLEDGE_TYPES } from '../types.js';
 import type { KnowledgeType } from '../types.js';
-import { type EntryJSON, type LinkJSON, parseEntryJSON, parseLinkJSON, SYNC_SCHEMA_VERSION } from './index.js';
+import { type EntryJSON, type LinkJSON, parseEntryJSON, parseLinkJSON } from './serialize.js';
+import { SYNC_SCHEMA_VERSION } from './config.js';
 
 /** Ensure the sync repo directory structure exists. */
 export function ensureRepoStructure(repoPath: string): void {

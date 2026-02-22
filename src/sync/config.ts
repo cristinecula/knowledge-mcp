@@ -1,22 +1,24 @@
 /**
- * Sync configuration — manages the git repo path and enabled state.
+ * Sync configuration — manages the sync configuration and enabled state.
  */
 
-let syncRepoPath: string | null = null;
+import type { SyncConfig } from './routing.js';
 
-/** Set the sync repo path. Null disables sync. */
-export function setSyncRepo(path: string | null): void {
-  syncRepoPath = path;
+let syncConfig: SyncConfig | null = null;
+
+/** Set the sync configuration. Null disables sync. */
+export function setSyncConfig(config: SyncConfig | null): void {
+  syncConfig = config;
 }
 
-/** Get the current sync repo path, or null if sync is disabled. */
-export function getSyncRepo(): string | null {
-  return syncRepoPath;
+/** Get the current sync configuration, or null if sync is disabled. */
+export function getSyncConfig(): SyncConfig | null {
+  return syncConfig;
 }
 
 /** Check if sync is enabled. */
 export function isSyncEnabled(): boolean {
-  return syncRepoPath !== null;
+  return syncConfig !== null;
 }
 
 /** Schema version for the sync repo metadata. */

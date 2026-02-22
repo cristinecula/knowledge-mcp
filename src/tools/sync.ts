@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getSyncRepo, isSyncEnabled, pull, push } from '../sync/index.js';
+import { getSyncConfig, isSyncEnabled, pull, push } from '../sync/index.js';
 
 export function registerSyncTool(server: McpServer): void {
   server.registerTool(
@@ -28,19 +28,19 @@ export function registerSyncTool(server: McpServer): void {
             content: [
               {
                 type: 'text' as const,
-                text: 'Sync is not enabled. Start the server with --sync-repo <path> to enable git-based knowledge sharing.',
+                text: 'Sync is not enabled. Start the server with --sync-repo <path> or --sync-config <path> to enable git-based knowledge sharing.',
               },
             ],
             isError: true,
           };
         }
 
-        const repoPath = getSyncRepo()!;
+        const config = getSyncConfig()!;
         const dir = direction ?? 'both';
         const result: Record<string, unknown> = { direction: dir };
 
         if (dir === 'pull' || dir === 'both') {
-          const pullResult = await pull(repoPath);
+          const pullResult = await pull(config);
           result.pulled = {
             new: pullResult.new_entries,
             updated: pullResult.updated,
@@ -55,7 +55,7 @@ export function registerSyncTool(server: McpServer): void {
         }
 
         if (dir === 'push' || dir === 'both') {
-          const pushResult = push(repoPath);
+          const pushResult = push(config);
           result.pushed = {
             new: pushResult.new_entries,
             updated: pushResult.updated,

@@ -21,7 +21,20 @@ import { registerLinkTool } from './tools/link.js';
 import { registerUpdateTool } from './tools/update.js';
 import { registerDeleteTool } from './tools/delete.js';
 import { registerSyncTool } from './tools/sync.js';
-import { setSyncRepo, isSyncEnabled, pull, ensureRepoStructure } from './sync/index.js';
+import { existsSync } from 'node:fs';
+import {
+  setSyncConfig,
+  isSyncEnabled,
+  pull,
+  loadSyncConfig,
+  ensureRepoStructure,
+  gitInit,
+  gitPull,
+  gitClone,
+  hasRemote,
+  gitAddRemote,
+} from './sync/index.js';
+import type { SyncConfig } from './sync/index.js';
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
@@ -33,6 +46,7 @@ let openaiApiKey: string | undefined;
 let embeddingModel: string | undefined;
 let backfill = false;
 let syncRepoPath: string | undefined;
+let syncConfigPath: string | undefined;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--db-path' && args[i + 1]) {
@@ -51,6 +65,8 @@ for (let i = 0; i < args.length; i++) {
     backfill = true;
   } else if (args[i] === '--sync-repo' && args[i + 1]) {
     syncRepoPath = args[++i];
+  } else if (args[i] === '--sync-config' && args[i + 1]) {
+    syncConfigPath = args[++i];
   } else if (args[i] === '--help') {
     console.error(`
 knowledge-mcp — Shared Agent Knowledge System (MCP Server)
@@ -66,7 +82,8 @@ Options:
   --openai-api-key <key>        API key for OpenAI embeddings (or set OPENAI_API_KEY env var)
   --embedding-model <model>     Override the default embedding model
   --backfill-embeddings         Generate embeddings for all existing entries on startup
-  --sync-repo <path>            Path to git repo for knowledge sharing (enables sync)
+  --sync-repo <path>            Path to single git repo for knowledge sharing
+  --sync-config <path>          Path to JSON config file for multi-repo sync
   --help                        Show this help message
 `);
     process.exit(0);
@@ -84,15 +101,76 @@ async function main(): Promise<void> {
     `Maintenance sweep: ${sweep.processed} entries processed, ${sweep.transitioned} transitioned to dormant`,
   );
 
-  // Initialize sync repo (if configured)
-  if (syncRepoPath) {
-    setSyncRepo(syncRepoPath);
-    ensureRepoStructure(syncRepoPath);
-    console.error(`Sync repo: ${syncRepoPath}`);
+  // Initialize sync (if configured)
+  let config: SyncConfig | null = null;
 
-    // Pull on startup
+  if (syncRepoPath && syncConfigPath) {
+    console.error('Error: Cannot use both --sync-repo and --sync-config');
+    process.exit(1);
+  }
+
+  if (syncRepoPath) {
+    config = {
+      repos: [
+        {
+          name: 'default',
+          path: syncRepoPath,
+        },
+      ],
+    };
+  } else if (syncConfigPath) {
     try {
-      const pullResult = await pull(syncRepoPath);
+      config = loadSyncConfig(syncConfigPath);
+    } catch (error) {
+      console.error(`Error loading sync config: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  }
+
+  if (config) {
+    setSyncConfig(config);
+    console.error(`Sync enabled with ${config.repos.length} repo(s)`);
+
+    // Initialize each repo
+    for (const repo of config.repos) {
+      // 1. Auto-clone if needed
+      if (!existsSync(repo.path)) {
+        if (repo.remote) {
+          console.error(`Cloning ${repo.name} from ${repo.remote}...`);
+          if (!gitClone(repo.remote, repo.path)) {
+            console.error(`Failed to clone ${repo.name}. Skipping sync for this repo.`);
+            continue;
+          }
+        } else {
+          // Initialize empty repo
+          console.error(`Initializing new repo for ${repo.name}...`);
+          gitInit(repo.path);
+        }
+      } else {
+        // Ensure it is a git repo
+        gitInit(repo.path);
+      }
+
+      // 2. Configure remote if needed
+      if (repo.remote) {
+        if (!hasRemote(repo.path)) {
+          gitAddRemote(repo.path, repo.remote);
+        } else {
+          // Remote exists — we assume it's correct or user manages it
+        }
+      }
+
+      // 3. Pull changes
+      console.error(`Pulling ${repo.name}...`);
+      gitPull(repo.path);
+
+      // 4. Ensure structure
+      ensureRepoStructure(repo.path);
+    }
+
+    // Pull import
+    try {
+      const pullResult = await pull(config);
       console.error(
         `Sync pull: ${pullResult.new_entries} new, ${pullResult.updated} updated, ` +
         `${pullResult.deleted} deleted, ${pullResult.conflicts} conflicts, ` +

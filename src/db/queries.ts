@@ -123,9 +123,24 @@ export function updateStrength(id: string, strength: number): void {
 
 export function updateStatus(id: string, status: Status): void {
   const db = getDb();
+  const now = new Date().toISOString();
   db.prepare(
-    'UPDATE knowledge SET status = ?, updated_at = ? WHERE id = ?',
-  ).run(status, new Date().toISOString(), id);
+    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ? WHERE id = ?',
+  ).run(status, now, now, id);
+}
+
+/**
+ * Deprecate a knowledge entry by setting its status to 'deprecated'.
+ * Returns the updated entry, or null if not found.
+ */
+export function deprecateKnowledge(id: string): KnowledgeEntry | null {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const result = db.prepare(
+    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ? WHERE id = ?',
+  ).run('deprecated', now, now, id);
+  if (result.changes === 0) return null;
+  return getKnowledgeById(id);
 }
 
 export function recordAccess(id: string, boost: number = 1): void {

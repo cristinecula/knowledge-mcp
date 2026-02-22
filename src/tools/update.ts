@@ -1,14 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { KNOWLEDGE_TYPES, SCOPES, REVALIDATION_LINK_TYPES } from '../types.js';
-import {
-  getKnowledgeById,
-  updateKnowledgeFields,
-  getIncomingLinks,
-  updateStatus,
-} from '../db/queries.js';
-import { embedAndStore } from '../embeddings/similarity.js';
-import { syncWriteEntry } from '../sync/index.js';
+import { updateKnowledgeFields, getKnowledgeById } from '../db/queries.js';
+import { syncWriteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
+import { KNOWLEDGE_TYPES, SCOPES } from '../types.js';
 
 export function registerUpdateTool(server: McpServer): void {
   server.registerTool(
@@ -20,46 +14,26 @@ export function registerUpdateTool(server: McpServer): void {
         'links are automatically flagged as "needs_revalidation" — they may need to be ' +
         'reviewed to ensure they\'re still accurate given the change.',
       inputSchema: {
-        id: z.string().describe('ID of the knowledge entry to update'),
+        id: z.string().uuid().describe('ID of the knowledge entry to update'),
         title: z.string().optional().describe('Updated title'),
         content: z.string().optional().describe('Updated content (markdown)'),
         tags: z.array(z.string()).optional().describe('Updated tags (replaces existing tags)'),
-        type: z.enum(KNOWLEDGE_TYPES).optional().describe('Updated knowledge type'),
+        type: z
+          .enum(KNOWLEDGE_TYPES)
+          .optional()
+          .describe(
+            'Updated knowledge type: convention, decision, pattern, pitfall, fact, debug_note, process',
+          ),
         project: z.string().optional().describe('Updated project scope'),
-        scope: z.enum(SCOPES).optional().describe('Updated scope level'),
+        scope: z
+          .enum(SCOPES)
+          .optional()
+          .describe('Updated scope level: company, project, repo'),
       },
     },
     async ({ id, title, content, tags, type, project, scope }) => {
       try {
-        const entry = getKnowledgeById(id);
-        if (!entry) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Knowledge entry not found: ${id}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        // Check that at least one field is being updated
-        if (!title && !content && !tags && !type && !project && !scope) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: 'No fields specified to update. Provide at least one of: title, content, tags, type, project, scope.',
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const oldType = entry.type;
-
-        // Apply updates
+        const oldEntry = getKnowledgeById(id);
         const updated = updateKnowledgeFields(id, {
           title,
           content,
@@ -69,73 +43,34 @@ export function registerUpdateTool(server: McpServer): void {
           scope,
         });
 
-        // Re-generate embedding if title, content, or tags changed
-        if (title !== undefined || content !== undefined || tags !== undefined) {
-          try {
-            await embedAndStore(
-              updated!.id,
-              updated!.title,
-              updated!.content,
-              updated!.tags,
-            );
-          } catch (embedError) {
-            console.error('Warning: failed to regenerate embedding:', embedError);
+        if (updated) {
+          syncWriteEntry(updated, oldEntry?.type, oldEntry?.scope, oldEntry?.project);
+          
+          for (const repoPath of touchedRepos) {
+            gitCommitAll(repoPath, `knowledge: update ${updated.type} "${updated.title}"`);
           }
+          clearTouchedRepos();
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Updated knowledge entry: ${updated.title} (ID: ${id})`,
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [{ type: 'text', text: `Entry not found: ${id}` }],
+            isError: true,
+          };
         }
-
-        // Cascade revalidation: flag entries that derived from or depend on the updated entry.
-        // These are entries where the updated entry is the TARGET of a derived/depends link
-        // (i.e., other entries point at this one saying "I depend on / am derived from this").
-        const revalidatedIds: string[] = [];
-        const incomingLinks = getIncomingLinks(id, REVALIDATION_LINK_TYPES);
-
-        for (const link of incomingLinks) {
-          const dependentEntry = getKnowledgeById(link.source_id);
-          if (
-            dependentEntry &&
-            dependentEntry.status !== 'deprecated' &&
-            dependentEntry.status !== 'dormant'
-          ) {
-            updateStatus(link.source_id, 'needs_revalidation');
-            revalidatedIds.push(link.source_id);
-          }
-        }
-
-        // Write-through to sync repo (pass old type for file cleanup on type change)
-        if (updated) syncWriteEntry(updated, type !== undefined ? oldType : undefined);
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  id: updated!.id,
-                  title: updated!.title,
-                  type: updated!.type,
-                  updated_fields: [
-                    title !== undefined && 'title',
-                    content !== undefined && 'content',
-                    tags !== undefined && 'tags',
-                    type !== undefined && 'type',
-                    project !== undefined && 'project',
-                    scope !== undefined && 'scope',
-                  ].filter(Boolean),
-                  revalidation_triggered: revalidatedIds,
-                  revalidation_count: revalidatedIds.length,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
       } catch (error) {
         return {
           content: [
             {
-              type: 'text' as const,
-              text: `Error updating knowledge: ${error instanceof Error ? error.message : String(error)}`,
+              type: 'text',
+              text: `Failed to update entry: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
           isError: true,

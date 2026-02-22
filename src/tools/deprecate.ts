@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getKnowledgeById, updateStatus, updateKnowledgeFields } from '../db/queries.js';
-import { syncWriteEntry } from '../sync/index.js';
+import { deprecateKnowledge, getKnowledgeById } from '../db/queries.js';
+import { syncWriteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
 
 export function registerDeprecateTool(server: McpServer): void {
   server.registerTool(
@@ -13,83 +13,41 @@ export function registerDeprecateTool(server: McpServer): void {
         'incorrect, or no longer applicable. The entry is not deleted — it becomes ' +
         'progressively harder to find, like a fading memory.',
       inputSchema: {
-        id: z.string().describe('ID of the knowledge entry to deprecate'),
-        reason: z.string().optional().describe('Why this knowledge is being deprecated'),
+        id: z.string().uuid().describe('The UUID of the entry to deprecate'),
+        reason: z.string().describe('The reason why this knowledge is being deprecated'),
       },
     },
     async ({ id, reason }) => {
       try {
-        const entry = getKnowledgeById(id);
-        if (!entry) {
+        const deprecated = deprecateKnowledge(id);
+        if (deprecated) {
+          syncWriteEntry(deprecated);
+          
+          for (const repoPath of touchedRepos) {
+            gitCommitAll(repoPath, `knowledge: deprecate ${deprecated.type} "${deprecated.title}"`);
+          }
+          clearTouchedRepos();
+
           return {
             content: [
               {
-                type: 'text' as const,
-                text: `Knowledge entry not found: ${id}`,
+                type: 'text',
+                text: `Deprecated knowledge entry: ${deprecated.title} (ID: ${id})`,
               },
             ],
+          };
+        } else {
+          return {
+            content: [{ type: 'text', text: `Entry not found: ${id}` }],
             isError: true,
           };
         }
-
-        if (entry.status === 'deprecated') {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: JSON.stringify(
-                  {
-                    id: entry.id,
-                    title: entry.title,
-                    message: 'Entry is already deprecated',
-                  },
-                  null,
-                  2,
-                ),
-              },
-            ],
-          };
-        }
-
-        // Mark as deprecated
-        updateStatus(id, 'deprecated');
-
-        // Append deprecation reason to content if provided
-        if (reason) {
-          const updatedContent =
-            entry.content + `\n\n---\n**Deprecated:** ${reason}`;
-          updateKnowledgeFields(id, { content: updatedContent });
-        }
-
-        // Write-through to sync repo
-        const deprecatedEntry = getKnowledgeById(id);
-        if (deprecatedEntry) syncWriteEntry(deprecatedEntry);
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  id: entry.id,
-                  title: entry.title,
-                  status: 'deprecated',
-                  reason: reason ?? null,
-                  message:
-                    'Entry marked as deprecated. It will decay 10x faster and fade from results.',
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
       } catch (error) {
         return {
           content: [
             {
-              type: 'text' as const,
-              text: `Error deprecating knowledge: ${error instanceof Error ? error.message : String(error)}`,
+              type: 'text',
+              text: `Failed to deprecate entry: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
           isError: true,

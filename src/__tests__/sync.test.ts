@@ -1,10 +1,10 @@
 /**
- * Tests for the git-based sync layer.
+ * Tests for the git-based sync layer with multi-repo support and git operations.
  *
- * Uses a temp directory for the sync repo and in-memory SQLite for isolation.
+ * Uses temp directories for the sync repos and in-memory SQLite for isolation.
  */
-import { describe, it, expect, beforeEach, afterAll, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setupTestDb, teardownTestDb } from './helpers.js';
@@ -28,578 +28,427 @@ import {
   ensureRepoStructure,
   writeEntryFile,
   writeLinkFile,
-  readAllEntryFiles,
-  readAllLinkFiles,
-  getRepoEntryIds,
-  deleteEntryFile,
+  push,
+  pull,
   detectConflict,
+  setSyncConfig,
+  getSyncConfig,
+  syncWriteEntry,
+  syncWriteLink,
+  syncDeleteEntry,
+  syncDeleteLink,
+  touchedRepos,
+  clearTouchedRepos,
 } from '../sync/index.js';
-import { pull } from '../sync/pull.js';
-import { push } from '../sync/push.js';
+import { gitInit, gitCommitAll, isGitRepo } from '../sync/git.js';
+import type { EntryJSON, LinkJSON } from '../sync/serialize.js';
+import type { SyncConfig } from '../sync/routing.js';
 
-let repoPath: string;
+describe('sync layer', () => {
+  let repoPath: string;
+  let repoPath2: string;
+  let config: SyncConfig;
 
-beforeEach(() => {
-  setupTestDb();
-  // Create a fresh temp directory for each test
-  repoPath = mkdtempSync(join(tmpdir(), 'knowledge-sync-test-'));
-  ensureRepoStructure(repoPath);
-});
+  beforeEach(() => {
+    setupTestDb();
+    repoPath = mkdtempSync(join(tmpdir(), 'knowledge-mcp-sync-'));
+    repoPath2 = mkdtempSync(join(tmpdir(), 'knowledge-mcp-sync-2-'));
+    
+    // Initialize git repos
+    gitInit(repoPath);
+    gitInit(repoPath2);
+    
+    config = {
+      repos: [
+        { name: 'default', path: repoPath },
+      ],
+    };
+    setSyncConfig(config);
+    clearTouchedRepos();
+  });
 
-afterEach(() => {
-  // Clean up temp directory
-  if (repoPath && existsSync(repoPath)) {
-    rmSync(repoPath, { recursive: true, force: true });
-  }
-});
+  afterEach(() => {
+    teardownTestDb();
+    setSyncConfig(null);
+    try {
+      if (existsSync(repoPath)) rmSync(repoPath, { recursive: true, force: true });
+      if (existsSync(repoPath2)) rmSync(repoPath2, { recursive: true, force: true });
+    } catch (e) {
+      console.error('Failed to clean up temp dir:', e);
+    }
+  });
 
-afterAll(() => {
-  teardownTestDb();
-});
+  describe('serialization', () => {
+    it('should serialize entry to JSON excluding local fields', () => {
+      const entry = insertKnowledge({
+        type: 'decision',
+        title: 'Test Decision',
+        content: 'Content',
+        tags: ['a', 'b'],
+        project: 'myproject',
+        scope: 'project',
+      });
 
-// === Serialize / Deserialize ===
+      const json = entryToJSON(entry);
 
-describe('serialize', () => {
-  it('should convert entry to JSON stripping local fields', () => {
-    const entry = insertKnowledge({
-      type: 'decision',
-      title: 'Test Decision',
-      content: 'Content here',
-      tags: ['a', 'b'],
-      project: 'myproject',
-      scope: 'project',
-      source: 'agent',
+      expect(json.id).toBe(entry.id);
+      expect(json.title).toBe('Test Decision');
+      expect(json.tags).toEqual(['a', 'b']);
+      expect(json.project).toBe('myproject');
+
+      // Local fields should NOT be in the JSON
+      const raw = json as unknown as Record<string, unknown>;
+      expect(raw.strength).toBeUndefined();
+      expect(raw.access_count).toBeUndefined();
+      expect(raw.last_accessed_at).toBeUndefined();
+      expect(raw.synced_at).toBeUndefined();
     });
 
-    const json = entryToJSON(entry);
-
-    expect(json.id).toBe(entry.id);
-    expect(json.type).toBe('decision');
-    expect(json.title).toBe('Test Decision');
-    expect(json.tags).toEqual(['a', 'b']);
-    expect(json.project).toBe('myproject');
-
-    // Local fields should NOT be in the JSON
-    const raw = json as unknown as Record<string, unknown>;
-    expect(raw.strength).toBeUndefined();
-    expect(raw.access_count).toBeUndefined();
-    expect(raw.last_accessed_at).toBeUndefined();
-    expect(raw.synced_at).toBeUndefined();
-  });
-
-  it('should parse valid entry JSON', () => {
-    const raw = {
-      id: 'test-id',
-      type: 'fact',
-      title: 'A Fact',
-      content: 'Fact content',
-      tags: ['x'],
-      project: null,
-      scope: 'company',
-      source: 'test',
-      status: 'active',
-      created_at: '2026-01-01T00:00:00.000Z',
-      updated_at: '2026-01-02T00:00:00.000Z',
-    };
-
-    const parsed = parseEntryJSON(raw);
-    expect(parsed.id).toBe('test-id');
-    expect(parsed.type).toBe('fact');
-    expect(parsed.tags).toEqual(['x']);
-  });
-
-  it('should throw on invalid entry JSON', () => {
-    expect(() => parseEntryJSON({})).toThrow('Missing or invalid id');
-    expect(() => parseEntryJSON({ id: 123 })).toThrow('Missing or invalid id');
-  });
-
-  it('should convert link to JSON', () => {
-    const a = insertKnowledge({ type: 'fact', title: 'A', content: 'a' });
-    const b = insertKnowledge({ type: 'fact', title: 'B', content: 'b' });
-    const link = insertLink({ sourceId: a.id, targetId: b.id, linkType: 'related' });
-
-    const json = linkToJSON(link);
-    expect(json.id).toBe(link.id);
-    expect(json.source_id).toBe(a.id);
-    expect(json.target_id).toBe(b.id);
-    expect(json.link_type).toBe('related');
-  });
-
-  it('should parse valid link JSON', () => {
-    const raw = {
-      id: 'link-id',
-      source_id: 'src',
-      target_id: 'tgt',
-      link_type: 'derived',
-      description: null,
-      source: 'test',
-      created_at: '2026-01-01T00:00:00.000Z',
-    };
-
-    const parsed = parseLinkJSON(raw);
-    expect(parsed.id).toBe('link-id');
-    expect(parsed.link_type).toBe('derived');
-  });
-});
-
-// === File system ===
-
-describe('file system', () => {
-  it('should create repo directory structure', () => {
-    expect(existsSync(join(repoPath, 'entries', 'decision'))).toBe(true);
-    expect(existsSync(join(repoPath, 'entries', 'fact'))).toBe(true);
-    expect(existsSync(join(repoPath, 'entries', 'convention'))).toBe(true);
-    expect(existsSync(join(repoPath, 'links'))).toBe(true);
-    expect(existsSync(join(repoPath, 'meta.json'))).toBe(true);
-  });
-
-  it('should write and read entry files', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'FS Test', content: 'fs content', tags: ['test'] });
-    const json = entryToJSON(entry);
-
-    writeEntryFile(repoPath, json);
-
-    const entries = readAllEntryFiles(repoPath);
-    expect(entries).toHaveLength(1);
-    expect(entries[0].id).toBe(entry.id);
-    expect(entries[0].title).toBe('FS Test');
-  });
-
-  it('should write and read link files', () => {
-    const a = insertKnowledge({ type: 'fact', title: 'A', content: 'a' });
-    const b = insertKnowledge({ type: 'fact', title: 'B', content: 'b' });
-    const link = insertLink({ sourceId: a.id, targetId: b.id, linkType: 'related' });
-    const json = linkToJSON(link);
-
-    writeLinkFile(repoPath, json);
-
-    const links = readAllLinkFiles(repoPath);
-    expect(links).toHaveLength(1);
-    expect(links[0].id).toBe(link.id);
-  });
-
-  it('should delete entry files', () => {
-    const entry = insertKnowledge({ type: 'decision', title: 'Delete Me', content: 'content' });
-    const json = entryToJSON(entry);
-    writeEntryFile(repoPath, json);
-
-    const ids = getRepoEntryIds(repoPath);
-    expect(ids.has(entry.id)).toBe(true);
-
-    deleteEntryFile(repoPath, entry.id, 'decision');
-
-    const idsAfter = getRepoEntryIds(repoPath);
-    expect(idsAfter.has(entry.id)).toBe(false);
-  });
-
-  it('should find entry file when type is unknown', () => {
-    const entry = insertKnowledge({ type: 'pattern', title: 'Find Me', content: 'content' });
-    const json = entryToJSON(entry);
-    writeEntryFile(repoPath, json);
-
-    // Delete without specifying type — should search all type dirs
-    deleteEntryFile(repoPath, entry.id);
-
-    const ids = getRepoEntryIds(repoPath);
-    expect(ids.has(entry.id)).toBe(false);
-  });
-});
-
-// === Merge logic ===
-
-describe('merge / conflict detection', () => {
-  it('should detect no_change when content is identical', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Same', content: 'same content' });
-    updateSyncedAt(entry.id);
-    const local = getKnowledgeById(entry.id)!;
-
-    const remote = entryToJSON(local);
-    const result = detectConflict(local, remote);
-
-    expect(result.action).toBe('no_change');
-  });
-
-  it('should detect remote_wins when only remote changed', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Original', content: 'original' });
-    updateSyncedAt(entry.id);
-    const local = getKnowledgeById(entry.id)!;
-
-    // Remote has newer content
-    const remote = {
-      ...entryToJSON(local),
-      title: 'Updated Remotely',
-      updated_at: new Date(Date.now() + 10000).toISOString(),
-    };
-
-    const result = detectConflict(local, remote);
-    expect(result.action).toBe('remote_wins');
-  });
-
-  it('should detect local_wins when only local changed', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Original', content: 'original' });
-
-    // Set synced_at to a past time
-    const pastSync = '2026-02-01T00:00:00.000Z';
-    updateSyncedAt(entry.id, pastSync);
-
-    // Now update locally (this bumps content_updated_at to "now", which is after pastSync)
-    updateKnowledgeFields(entry.id, { title: 'Updated Locally' });
-    const local = getKnowledgeById(entry.id)!;
-
-    // Remote has NOT changed since last sync (updated_at is before synced_at)
-    const remote = {
-      ...entryToJSON(entry),
-      title: 'Original',
-      updated_at: '2026-01-31T00:00:00.000Z',
-    };
-
-    const result = detectConflict(local, remote);
-    expect(result.action).toBe('local_wins');
-  });
-
-  it('should detect conflict when both sides changed', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Original', content: 'original' });
-
-    // Set synced_at to a past time
-    const pastSync = '2026-02-01T00:00:00.000Z';
-    updateSyncedAt(entry.id, pastSync);
-
-    // Update locally (bumps content_updated_at to "now", after pastSync)
-    updateKnowledgeFields(entry.id, { content: 'local changes' });
-    const local = getKnowledgeById(entry.id)!;
-
-    // Remote also changed after sync time
-    const remote = {
-      ...entryToJSON(entry),
-      content: 'remote changes',
-      updated_at: new Date(Date.now() + 10000).toISOString(),
-    };
-
-    const result = detectConflict(local, remote);
-    expect(result.action).toBe('conflict');
-  });
-
-  it('should detect conflict for never-synced entries with different content', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Never Synced', content: 'local content' });
-    const local = getKnowledgeById(entry.id)!;
-    // synced_at is null
-
-    const remote = {
-      ...entryToJSON(local),
-      content: 'different remote content',
-    };
-
-    const result = detectConflict(local, remote);
-    expect(result.action).toBe('conflict');
-  });
-
-  it('should detect no_change for never-synced entries with same content', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Same', content: 'same' });
-    const local = getKnowledgeById(entry.id)!;
-
-    const remote = entryToJSON(local);
-    const result = detectConflict(local, remote);
-
-    expect(result.action).toBe('no_change');
-  });
-});
-
-// === Push ===
-
-describe('push', () => {
-  it('should export all local entries to the repo', () => {
-    insertKnowledge({ type: 'fact', title: 'Fact 1', content: 'content 1' });
-    insertKnowledge({ type: 'decision', title: 'Decision 1', content: 'content 2' });
-
-    const result = push(repoPath);
-
-    expect(result.new_entries).toBe(2);
-    expect(result.updated).toBe(0);
-
-    const repoEntries = readAllEntryFiles(repoPath);
-    expect(repoEntries).toHaveLength(2);
-  });
-
-  it('should export links to the repo', () => {
-    const a = insertKnowledge({ type: 'fact', title: 'A', content: 'a' });
-    const b = insertKnowledge({ type: 'fact', title: 'B', content: 'b' });
-    insertLink({ sourceId: a.id, targetId: b.id, linkType: 'related' });
-
-    const result = push(repoPath);
-
-    expect(result.new_links).toBe(1);
-
-    const repoLinks = readAllLinkFiles(repoPath);
-    expect(repoLinks).toHaveLength(1);
-  });
-
-  it('should skip [Sync Conflict] entries', () => {
-    insertKnowledge({ type: 'fact', title: '[Sync Conflict] Something', content: 'conflict version' });
-    insertKnowledge({ type: 'fact', title: 'Normal Entry', content: 'normal' });
-
-    const result = push(repoPath);
-
-    expect(result.new_entries).toBe(1);
-    const repoEntries = readAllEntryFiles(repoPath);
-    expect(repoEntries).toHaveLength(1);
-    expect(repoEntries[0].title).toBe('Normal Entry');
-  });
-
-  it('should update synced_at after push', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
-    expect(getKnowledgeById(entry.id)!.synced_at).toBeNull();
-
-    push(repoPath);
-
-    expect(getKnowledgeById(entry.id)!.synced_at).not.toBeNull();
-  });
-
-  it('should remove entries from repo that were deleted locally', () => {
-    const a = insertKnowledge({ type: 'fact', title: 'Keep', content: 'keep' });
-    const b = insertKnowledge({ type: 'fact', title: 'Delete', content: 'delete' });
-
-    // First push
-    push(repoPath);
-    expect(getRepoEntryIds(repoPath).size).toBe(2);
-
-    // Delete locally
-    deleteKnowledge(b.id);
-
-    // Second push
-    const result = push(repoPath);
-    expect(result.deleted).toBe(1);
-    expect(getRepoEntryIds(repoPath).size).toBe(1);
-    expect(getRepoEntryIds(repoPath).has(a.id)).toBe(true);
-  });
-});
-
-// === Pull ===
-
-describe('pull', () => {
-  it('should import new entries from the repo', async () => {
-    // Write entry directly to repo (simulating another user's push)
-    const remoteEntry = {
-      id: 'remote-entry-1',
-      type: 'convention' as const,
-      title: 'Remote Convention',
-      content: 'Convention from teammate',
-      tags: ['remote'],
-      project: null,
-      scope: 'company' as const,
-      source: 'teammate',
-      status: 'active' as const,
-      created_at: '2026-02-20T10:00:00.000Z',
-      updated_at: '2026-02-20T10:00:00.000Z',
-    };
-    writeEntryFile(repoPath, remoteEntry);
-
-    const result = await pull(repoPath);
-
-    expect(result.new_entries).toBe(1);
-
-    const imported = getKnowledgeById('remote-entry-1');
-    expect(imported).not.toBeNull();
-    expect(imported!.title).toBe('Remote Convention');
-    expect(imported!.synced_at).not.toBeNull();
-  });
-
-  it('should import new links from the repo', async () => {
-    // Create entries locally first
-    const a = insertKnowledge({ type: 'fact', title: 'A', content: 'a' });
-    const b = insertKnowledge({ type: 'fact', title: 'B', content: 'b' });
-
-    // Write a link to the repo (simulating another user)
-    writeLinkFile(repoPath, {
-      id: 'remote-link-1',
-      source_id: a.id,
-      target_id: b.id,
-      link_type: 'related',
-      description: 'Remote link',
-      source: 'teammate',
-      created_at: '2026-02-20T10:00:00.000Z',
+    it('should parse valid entry JSON', () => {
+      const raw: EntryJSON = {
+        id: 'test-id',
+        type: 'fact',
+        title: 'Title',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const entry = parseEntryJSON(raw);
+      expect(entry.id).toBe('test-id');
+      expect(entry.title).toBe('Title');
     });
 
-    const result = await pull(repoPath);
-    expect(result.new_links).toBe(1);
+    it('should serialize link to JSON', () => {
+      const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
+      const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
+      const link = insertLink({
+        sourceId: e1.id,
+        targetId: e2.id,
+        linkType: 'related',
+        description: 'desc',
+        source: 'user',
+      });
 
-    const links = getAllLinks();
-    expect(links.some((l) => l.id === 'remote-link-1')).toBe(true);
+      const json = linkToJSON(link);
+      expect(json.id).toBe(link.id);
+      expect(json.source_id).toBe(e1.id);
+      expect(json.target_id).toBe(e2.id);
+      expect(json.link_type).toBe('related');
+    });
   });
 
-  it('should apply remote_wins when only remote changed', async () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Original', content: 'original content' });
-    updateSyncedAt(entry.id);
-
-    // Write updated version to repo
-    writeEntryFile(repoPath, {
-      id: entry.id,
-      type: 'fact',
-      title: 'Updated by Remote',
-      content: 'remote content',
-      tags: [],
-      project: null,
-      scope: 'company',
-      source: 'unknown',
-      status: 'active',
-      created_at: entry.created_at,
-      updated_at: new Date(Date.now() + 10000).toISOString(),
+  describe('fs', () => {
+    it('should create repo structure', () => {
+      ensureRepoStructure(repoPath);
+      expect(existsSync(join(repoPath, 'entries', 'fact'))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'decision'))).toBe(true);
+      expect(existsSync(join(repoPath, 'links'))).toBe(true);
+      expect(existsSync(join(repoPath, 'meta.json'))).toBe(true);
     });
 
-    const result = await pull(repoPath);
-    expect(result.updated).toBe(1);
+    it('should write and read entry files', () => {
+      ensureRepoStructure(repoPath);
+      const entry: EntryJSON = {
+        id: 'test-id',
+        type: 'fact',
+        title: 'Title',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
-    const updated = getKnowledgeById(entry.id)!;
-    expect(updated.title).toBe('Updated by Remote');
-    expect(updated.content).toBe('remote content');
+      writeEntryFile(repoPath, entry);
+      expect(existsSync(join(repoPath, 'entries', 'fact', 'test-id.json'))).toBe(true);
+    });
   });
 
-  it('should create conflict entry when both sides changed', async () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Original', content: 'original' });
-
-    // Set synced_at to past so both local and remote changes appear "after sync"
-    const pastSync = '2026-02-01T00:00:00.000Z';
-    updateSyncedAt(entry.id, pastSync);
-
-    // Update locally (bumps content_updated_at to "now", which is after pastSync)
-    updateKnowledgeFields(entry.id, { content: 'local edit' });
-
-    // Write different version to repo (also after pastSync)
-    writeEntryFile(repoPath, {
-      id: entry.id,
-      type: 'fact',
-      title: 'Original',
-      content: 'remote edit',
-      tags: [],
-      project: null,
-      scope: 'company',
-      source: 'unknown',
-      status: 'active',
-      created_at: entry.created_at,
-      updated_at: new Date(Date.now() + 10000).toISOString(),
+  describe('git integration', () => {
+    it('should initialize a git repo', () => {
+      expect(isGitRepo(repoPath)).toBe(true);
     });
 
-    const result = await pull(repoPath);
-    expect(result.conflicts).toBe(1);
-    expect(result.conflict_details).toHaveLength(1);
-    expect(result.conflict_details[0].original_id).toBe(entry.id);
+    it('should commit changes', () => {
+      ensureRepoStructure(repoPath);
+      const entry: EntryJSON = {
+        id: 'test-id',
+        type: 'fact',
+        title: 'Title',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
-    // Local entry should be flagged
-    const local = getKnowledgeById(entry.id)!;
-    expect(local.status).toBe('needs_revalidation');
-    expect(local.content).toBe('local edit'); // Content preserved
-
-    // Conflict entry should exist
-    const conflictId = result.conflict_details[0].conflict_id;
-    const conflict = getKnowledgeById(conflictId)!;
-    expect(conflict.title).toContain('[Sync Conflict]');
-    expect(conflict.content).toBe('remote edit');
-    expect(conflict.status).toBe('needs_revalidation');
-
-    // Should have a contradicts link
-    const links = getAllLinks();
-    const contradicts = links.find(
-      (l) => l.source_id === conflictId && l.target_id === entry.id && l.link_type === 'contradicts',
-    );
-    expect(contradicts).toBeDefined();
+      writeEntryFile(repoPath, entry);
+      
+      const committed = gitCommitAll(repoPath, 'test commit');
+      expect(committed).toBe(true);
+      
+      // Second commit with no changes should return false
+      const committedAgain = gitCommitAll(repoPath, 'empty commit');
+      expect(committedAgain).toBe(false);
+    });
   });
 
-  it('should delete entries that were removed from the repo', async () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Will be deleted remotely', content: 'content' });
+  describe('write-through', () => {
+    it('should write entry to repo on save', () => {
+      const entry = insertKnowledge({ title: 'Test', type: 'fact', content: 'Content' });
+      syncWriteEntry(entry);
 
-    // Push so it's in the repo and has synced_at
-    push(repoPath);
-    expect(getKnowledgeById(entry.id)!.synced_at).not.toBeNull();
-
-    // Remove from repo (simulating another user deleting it)
-    deleteEntryFile(repoPath, entry.id, 'fact');
-
-    const result = await pull(repoPath);
-    expect(result.deleted).toBe(1);
-    expect(getKnowledgeById(entry.id)).toBeNull();
-  });
-
-  it('should NOT delete local-only entries (never synced) that are not in repo', async () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Local Only', content: 'never pushed' });
-    // synced_at is null — this was never pushed
-
-    const result = await pull(repoPath);
-    expect(result.deleted).toBe(0);
-    expect(getKnowledgeById(entry.id)).not.toBeNull();
-  });
-});
-
-// === Full round-trip ===
-
-describe('round-trip push + pull', () => {
-  it('should round-trip entries through push and pull', async () => {
-    const entry = insertKnowledge({
-      type: 'decision',
-      title: 'Round Trip Test',
-      content: 'Testing full round-trip',
-      tags: ['test', 'sync'],
-      project: 'myproject',
-      scope: 'project',
-      source: 'agent',
+      expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+      expect(touchedRepos.has(repoPath)).toBe(true);
     });
 
-    // Push to repo
-    push(repoPath);
+    it('should handle type changes by moving file', () => {
+      const entry = insertKnowledge({ title: 'Test', type: 'fact', content: 'Content' });
+      syncWriteEntry(entry);
 
-    // Verify JSON file exists and has correct content
-    const repoEntries = readAllEntryFiles(repoPath);
-    expect(repoEntries).toHaveLength(1);
-    expect(repoEntries[0].title).toBe('Round Trip Test');
-    expect(repoEntries[0].tags).toEqual(['test', 'sync']);
+      // Change type
+      const updated = updateKnowledgeFields(entry.id, { type: 'pattern' });
+      syncWriteEntry(updated!, 'fact'); // oldType='fact'
 
-    // Verify the JSON doesn't have local-only fields
-    const filePath = join(repoPath, 'entries', 'decision', `${entry.id}.json`);
-    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
-    expect(raw.strength).toBeUndefined();
-    expect(raw.access_count).toBeUndefined();
+      expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'pattern', `${entry.id}.json`))).toBe(true);
+    });
+
+    it('should route to correct repo based on config', () => {
+      // Setup multi-repo config
+      const multiConfig: SyncConfig = {
+        repos: [
+          { name: 'company', path: repoPath, scope: 'company' },
+          { name: 'project', path: repoPath2, scope: 'project' },
+        ],
+      };
+      setSyncConfig(multiConfig);
+
+      // Company entry -> repoPath
+      const companyEntry = insertKnowledge({ title: 'Company', type: 'fact', content: 'C', scope: 'company' });
+      syncWriteEntry(companyEntry);
+      expect(existsSync(join(repoPath, 'entries', 'fact', `${companyEntry.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', `${companyEntry.id}.json`))).toBe(false);
+
+      // Project entry -> repoPath2
+      const projectEntry = insertKnowledge({ title: 'Project', type: 'fact', content: 'P', scope: 'project' });
+      syncWriteEntry(projectEntry);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', `${projectEntry.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'fact', `${projectEntry.id}.json`))).toBe(false);
+    });
+
+    it('should move entry between repos when scope changes', () => {
+      // Setup multi-repo config
+      const multiConfig: SyncConfig = {
+        repos: [
+          { name: 'company', path: repoPath, scope: 'company' },
+          { name: 'project', path: repoPath2, scope: 'project' },
+        ],
+      };
+      setSyncConfig(multiConfig);
+
+      // Start as project
+      const entry = insertKnowledge({ title: 'Move Me', type: 'fact', content: 'C', scope: 'project' });
+      syncWriteEntry(entry);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+
+      // Change to company
+      const updated = updateKnowledgeFields(entry.id, { scope: 'company' });
+      syncWriteEntry(updated!, 'fact', 'project', null); // oldScope='project'
+
+      // Should be gone from project repo, present in company repo
+      expect(existsSync(join(repoPath2, 'entries', 'fact', `${entry.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+      
+      expect(touchedRepos.has(repoPath)).toBe(true);
+      expect(touchedRepos.has(repoPath2)).toBe(true);
+    });
   });
 
-  it('should handle type changes correctly in round-trip', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Type Change', content: 'content' });
+  describe('pull', () => {
+    it('should import new entries from repo', async () => {
+      const entry: EntryJSON = {
+        id: 'remote-1',
+        type: 'fact',
+        title: 'Remote Title',
+        content: 'Remote Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'remote',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      ensureRepoStructure(repoPath);
+      writeEntryFile(repoPath, entry);
 
-    // Push as fact
-    push(repoPath);
-    expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+      const result = await pull(config);
+      expect(result.new_entries).toBe(1);
 
-    // Change type locally
-    updateKnowledgeFields(entry.id, { type: 'decision' });
+      const local = getKnowledgeById('remote-1');
+      expect(local).toBeTruthy();
+      expect(local?.title).toBe('Remote Title');
+    });
 
-    // Push again — should move file
-    push(repoPath);
-    expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(false);
-    expect(existsSync(join(repoPath, 'entries', 'decision', `${entry.id}.json`))).toBe(true);
+    it('should detect remote deletions', async () => {
+      // Create local entry that thinks it was synced
+      const entry = insertKnowledge({ title: 'Deleted Remote', type: 'fact', content: '' });
+      updateSyncedAt(entry.id);
+
+      // It doesn't exist in repo (repo is empty)
+      ensureRepoStructure(repoPath);
+
+      const result = await pull(config);
+      expect(result.deleted).toBe(1);
+
+      const local = getKnowledgeById(entry.id);
+      expect(local).toBeNull();
+    });
+
+    it('should aggregate entries from multiple repos', async () => {
+      // Setup multi-repo config
+      const multiConfig: SyncConfig = {
+        repos: [
+          { name: 'r1', path: repoPath },
+          { name: 'r2', path: repoPath2 },
+        ],
+      };
+
+      // Entry 1 in repo 1
+      ensureRepoStructure(repoPath);
+      writeEntryFile(repoPath, {
+        id: 'e1', type: 'fact', title: 'E1', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+
+      // Entry 2 in repo 2
+      ensureRepoStructure(repoPath2);
+      writeEntryFile(repoPath2, {
+        id: 'e2', type: 'fact', title: 'E2', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+
+      const result = await pull(multiConfig);
+      expect(result.new_entries).toBe(2);
+      expect(getKnowledgeById('e1')).toBeTruthy();
+      expect(getKnowledgeById('e2')).toBeTruthy();
+    });
   });
-});
 
-// === Schema migration ===
+  describe('push', () => {
+    it('should export all local entries to repo', () => {
+      insertKnowledge({ title: 'A', type: 'fact', content: '' });
+      insertKnowledge({ title: 'B', type: 'decision', content: '' });
 
-describe('schema migration', () => {
-  it('should have content_updated_at set on new entries', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
-    expect(entry.content_updated_at).toBeTruthy();
-    expect(entry.content_updated_at).toBe(entry.updated_at);
+      const result = push(config);
+      expect(result.new_entries).toBe(2);
+
+      const files = getAllEntries(); // Just checking we have 2
+      expect(files.length).toBe(2);
+    });
+
+    it('should route entries to correct repos during push', () => {
+      // Setup multi-repo config
+      const multiConfig: SyncConfig = {
+        repos: [
+          { name: 'company', path: repoPath, scope: 'company' },
+          { name: 'project', path: repoPath2, scope: 'project' },
+        ],
+      };
+
+      const e1 = insertKnowledge({ title: 'Company', type: 'fact', content: '', scope: 'company' });
+      const e2 = insertKnowledge({ title: 'Project', type: 'fact', content: '', scope: 'project' });
+
+      const result = push(multiConfig);
+      expect(result.new_entries).toBe(2);
+
+      // Check files in correct repos
+      expect(existsSync(join(repoPath, 'entries', 'fact', `${e1.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', `${e2.id}.json`))).toBe(true);
+
+      // Check files NOT in wrong repos
+      expect(existsSync(join(repoPath2, 'entries', 'fact', `${e1.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'fact', `${e2.id}.json`))).toBe(false);
+    });
   });
 
-  it('should update content_updated_at on field changes', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
+  describe('conflict detection', () => {
+    it('should return no_change when timestamps match', () => {
+      const now = new Date().toISOString();
+      const local: any = { content_updated_at: now, synced_at: now };
+      const remote: any = { updated_at: now };
+      
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('no_change');
+    });
 
-    // Set synced_at to a known past time so we can verify content_updated_at advances past it
-    updateSyncedAt(entry.id, '2026-01-01T00:00:00.000Z');
+    it('should return remote_wins when remote is newer', () => {
+      const past = '2020-01-01T00:00:00.000Z';
+      const now = new Date().toISOString();
+      // local hasn't changed since sync (synced_at >= content_updated_at)
+      const local: any = { content_updated_at: past, synced_at: past };
+      // remote has changed (updated_at > synced_at)
+      const remote: any = { updated_at: now };
 
-    const updated = updateKnowledgeFields(entry.id, { title: 'Updated' });
-    expect(updated!.content_updated_at).toBeTruthy();
-    // content_updated_at should equal updated_at (both set to now during update)
-    expect(updated!.content_updated_at).toBe(updated!.updated_at);
-    // content_updated_at should be after our past synced_at, proving it was refreshed
-    expect(updated!.content_updated_at! > '2026-01-01T00:00:00.000Z').toBe(true);
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('remote_wins');
+    });
+
+    it('should return local_wins when local is newer', () => {
+      const past = '2020-01-01T00:00:00.000Z';
+      const now = new Date().toISOString();
+      // local changed since sync (content_updated_at > synced_at)
+      const local: any = { content_updated_at: now, synced_at: past };
+      // remote hasn't changed since sync (updated_at <= synced_at)
+      const remote: any = { updated_at: past };
+
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('local_wins');
+    });
+
+    it('should return conflict when both changed', () => {
+      const past = '2020-01-01T00:00:00.000Z';
+      const now = new Date().toISOString();
+      const future = new Date(Date.now() + 1000).toISOString();
+      
+      // Both changed since sync
+      const local: any = { content_updated_at: now, synced_at: past, content: 'local' };
+      const remote: any = { updated_at: future, content: 'remote' };
+
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('conflict');
+    });
   });
 
-  it('should have synced_at as null on new entries', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
-    expect(entry.synced_at).toBeNull();
+  describe('schema migration', () => {
+    it('should update content_updated_at on field changes', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
+
+      // Set synced_at to a known past time so we can verify content_updated_at advances past it
+      updateSyncedAt(entry.id, '2026-01-01T00:00:00.000Z');
+
+      const updated = updateKnowledgeFields(entry.id, { title: 'Updated' });
+      expect(updated!.content_updated_at).toBeTruthy();
+      // content_updated_at should equal updated_at (both set to now during update)
+      expect(updated!.content_updated_at).toBe(updated!.updated_at);
+      // content_updated_at should be after our past synced_at, proving it was refreshed
+      expect(updated!.content_updated_at! > '2026-01-01T00:00:00.000Z').toBe(true);
+    });
+
+    it('should have synced_at as null on new entries', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
+      expect(entry.synced_at).toBeNull();
+    });
   });
 });

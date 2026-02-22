@@ -1,133 +1,82 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { KNOWLEDGE_TYPES, SCOPES, LINK_TYPES } from '../types.js';
-import { insertKnowledge, insertLink, getKnowledgeById, updateStatus } from '../db/queries.js';
-import { embedAndStore } from '../embeddings/similarity.js';
-import { syncWriteEntry, syncWriteLink } from '../sync/index.js';
+import { insertKnowledge, insertLink } from '../db/queries.js';
+import { syncWriteEntry, syncWriteLink, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
+import { KNOWLEDGE_TYPES, LINK_TYPES, SCOPES } from '../types.js';
 
 export function registerStoreTool(server: McpServer): void {
   server.registerTool(
     'store_knowledge',
     {
       description:
-        'Store a new piece of knowledge in the shared knowledge base. ' +
-        'Knowledge can be conventions, decisions, patterns, pitfalls, facts, debug notes, or process documentation. ' +
-        'Entries start with full strength (1.0) and will naturally decay over time unless accessed. ' +
-        'Optionally link this entry to existing entries. ' +
-        'If a "supersedes" link is included, the target entry is automatically flagged as "needs_revalidation".',
+        'Store a new piece of knowledge in the shared knowledge base. Knowledge can be ' +
+        'conventions, decisions, patterns, pitfalls, facts, debug notes, or process ' +
+        'documentation. Entries start with full strength (1.0) and will naturally decay ' +
+        'over time unless accessed. Optionally link this entry to existing entries.',
       inputSchema: {
         title: z.string().describe('Short summary of the knowledge (1-2 sentences)'),
         content: z.string().describe('Full content in markdown format'),
-        type: z.enum(KNOWLEDGE_TYPES).describe(
-          'Type of knowledge: convention (coding standards), decision (architectural choices), ' +
-          'pattern (reusable approaches), pitfall (things to avoid), fact (codebase facts), ' +
-          'debug_note (debugging insights), process (workflow documentation)',
-        ),
+        type: z
+          .enum(KNOWLEDGE_TYPES)
+          .describe(
+            'Type of knowledge: convention (coding standards), decision (architectural choices), pattern (reusable approaches), pitfall (things to avoid), fact (codebase facts), debug_note (debugging insights), process (workflow documentation)',
+          ),
         tags: z.array(z.string()).optional().describe('Tags for categorization (e.g., ["react", "auth", "api"])'),
+        scope: z
+          .enum(SCOPES)
+          .optional()
+          .describe('Scope level: company (default), project, or repo'),
         project: z.string().optional().describe('Project this knowledge belongs to (omit for company-wide)'),
-        scope: z.enum(SCOPES).optional().describe('Scope level: company (default), project, or repo'),
         source: z.string().optional().describe('Who or what created this (e.g., agent name, human name)'),
         links: z
           .array(
             z.object({
-              target_id: z.string().describe('ID of the knowledge entry to link to'),
-              link_type: z.enum(LINK_TYPES).describe(
-                'Type of link: related, derived (deduced from target), depends (requires target to be true), ' +
-                'contradicts, supersedes (replaces target), elaborates (adds detail to target)',
-              ),
-              description: z.string().optional().describe('Why these entries are linked'),
+              target_id: z.string().uuid(),
+              link_type: z.enum(LINK_TYPES),
+              description: z.string().optional(),
             }),
           )
           .optional()
           .describe('Optional links to existing knowledge entries'),
       },
     },
-    async ({ title, content, type, tags, project, scope, source, links }) => {
+    async ({ title, content, type, tags, scope, project, source, links }) => {
       try {
         const entry = insertKnowledge({
-          type,
           title,
           content,
-          tags,
-          project,
-          scope,
-          source,
+          type,
+          tags: tags || [],
+          scope: scope || 'company',
+          project: project || null,
+          source: source || 'agent',
         });
+        syncWriteEntry(entry);
 
-        // Create any initial links
-        const createdLinks = [];
         if (links && links.length > 0) {
           for (const link of links) {
-            // Verify target exists
-            const target = getKnowledgeById(link.target_id);
-            if (!target) {
-              createdLinks.push({
-                target_id: link.target_id,
-                error: 'Target entry not found',
-              });
-              continue;
-            }
-
-            const createdLink = insertLink({
+            const newLink = insertLink({
               sourceId: entry.id,
               targetId: link.target_id,
               linkType: link.link_type,
               description: link.description,
-              source: source ?? 'unknown',
+              source: source || 'agent',
             });
-
-            // Flag target for revalidation when superseded
-            let targetRevalidated = false;
-            if (link.link_type === 'supersedes') {
-              if (
-                target.status !== 'deprecated' &&
-                target.status !== 'dormant'
-              ) {
-                updateStatus(link.target_id, 'needs_revalidation');
-                targetRevalidated = true;
-              }
-            }
-
-            // Write-through link to sync repo
-            syncWriteLink(createdLink);
-
-            createdLinks.push({
-              link_id: createdLink.id,
-              target_id: link.target_id,
-              link_type: link.link_type,
-              ...(targetRevalidated && { target_revalidated: true }),
-            });
+            syncWriteLink(newLink, entry);
           }
         }
 
-        // Generate and store embedding (if provider configured)
-        try {
-          await embedAndStore(entry.id, entry.title, entry.content, entry.tags);
-        } catch (embedError) {
-          console.error('Warning: failed to generate embedding:', embedError);
+        // Commit all changes
+        for (const repoPath of touchedRepos) {
+          gitCommitAll(repoPath, `knowledge: store ${entry.type} "${entry.title}"` + (links ? ` with ${links.length} links` : ''));
         }
-
-        // Write-through to sync repo
-        const storedEntry = getKnowledgeById(entry.id);
-        if (storedEntry) syncWriteEntry(storedEntry);
-
-        const result: Record<string, unknown> = {
-          id: entry.id,
-          title: entry.title,
-          type: entry.type,
-          strength: entry.strength,
-          status: entry.status,
-        };
-
-        if (createdLinks.length > 0) {
-          result.links = createdLinks;
-        }
+        clearTouchedRepos();
 
         return {
           content: [
             {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
+              type: 'text',
+              text: JSON.stringify(entry, null, 2),
             },
           ],
         };
@@ -135,8 +84,8 @@ export function registerStoreTool(server: McpServer): void {
         return {
           content: [
             {
-              type: 'text' as const,
-              text: `Error storing knowledge: ${error instanceof Error ? error.message : String(error)}`,
+              type: 'text',
+              text: `Failed to store knowledge: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
           isError: true,

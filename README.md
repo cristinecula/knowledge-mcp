@@ -90,9 +90,39 @@ With semantic search enabled (local embeddings):
 | `--embedding-provider <type>` | Embedding provider: `none`, `local`, or `openai` | `none` |
 | `--openai-api-key <key>` | API key for OpenAI embeddings (or set `OPENAI_API_KEY` env var) | — |
 | `--embedding-model <model>` | Override the default embedding model | Provider default |
-| `--sync-repo <path>` | Path to a git repo for team knowledge sync | — |
+| `--sync-repo <path>` | Path to a single git repo for team knowledge sync | — |
+| `--sync-config <path>` | Path to a JSON config file for multi-repo sync | — |
 | `--backfill-embeddings` | Generate embeddings for all existing entries on startup | — |
 | `--help` | Show help message | — |
+
+### Multi-Repo Configuration
+
+To sync across multiple repositories (e.g., separate repos for company-wide vs. project-specific knowledge), use `--sync-config` with a JSON file:
+
+```json
+{
+  "repos": [
+    {
+      "name": "company-knowledge",
+      "path": "/path/to/company-repo",
+      "scope": "company",
+      "remote": "git@github.com:org/company-knowledge.git"
+    },
+    {
+      "name": "project-alpha",
+      "path": "/path/to/project-alpha-repo",
+      "project": "alpha",
+      "remote": "git@github.com:org/project-alpha-knowledge.git"
+    },
+    {
+      "name": "personal",
+      "path": "/path/to/personal-repo"
+    }
+  ]
+}
+```
+
+The system routes entries to the first matching repo based on `scope` and `project`. If `remote` is provided, the system will automatically clone the repo if it doesn't exist locally.
 
 ### Embedding Providers
 
@@ -139,10 +169,11 @@ The sync layer enables team knowledge sharing via a shared git repository. Each 
 
 - **Source of truth:** JSON files in the git repo (`entries/{type}/{id}.json`, `links/{id}.json`)
 - **Local DB:** SQLite acts as a personal index/cache. Memory fields (strength, access count, last accessed) stay local — each person's memory is personal.
-- **Write-through:** Every local write (store, update, delete, link, deprecate) is immediately written to the repo as JSON files.
-- **Pull on startup:** When the server starts, it pulls all changes from the repo into the local DB.
+- **Write-through:** Every local write (store, update, delete, link, deprecate) is immediately written to the repo as JSON files and committed (`git commit`).
+- **Pull on startup:** When the server starts, it pulls all changes from the configured repos into the local DB.
 - **Manual sync:** Use the `sync_knowledge` tool to pull/push mid-session.
-- **Git operations:** The sync layer does NOT run git commands. You manage `git add/commit/push/pull` yourself (or let your agent do it).
+- **Auto-clone:** If a repo path is missing but has a `remote` URL, the system automatically clones it on startup.
+- **Git operations:** The sync layer handles `git add/commit/push/pull` automatically.
 
 ### Conflict resolution
 
@@ -173,15 +204,11 @@ shared-knowledge-repo/
 ### Setup
 
 ```bash
-# Create the shared repo
-mkdir shared-knowledge && cd shared-knowledge && git init
-
-# Start the server with sync
+# Start the server with a sync repo
 node build/index.js --sync-repo /path/to/shared-knowledge
 
-# After making changes, commit and push
-cd /path/to/shared-knowledge
-git add -A && git commit -m "sync knowledge" && git push
+# OR with a multi-repo config
+node build/index.js --sync-config config.json
 ```
 
 ## Architecture

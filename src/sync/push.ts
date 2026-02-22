@@ -21,6 +21,9 @@ import {
   getRepoEntryIds,
   getRepoLinkIds,
 } from './fs.js';
+import { resolveRepoForScope } from './routing.js';
+import { gitCommitAll, gitPush } from './git.js';
+import type { KnowledgeEntry, KnowledgeLink } from '../types.js';
 
 export interface PushResult {
   new_entries: number;
@@ -33,13 +36,7 @@ export interface PushResult {
 /**
  * Push local entries to the sync repo.
  */
-export function push(repoPath: string): PushResult {
-  if (!existsSync(repoPath)) {
-    throw new Error(`Sync repo not found: ${repoPath}`);
-  }
-
-  ensureRepoStructure(repoPath);
-
+export function push(config: import('./routing.js').SyncConfig): PushResult {
   const result: PushResult = {
     new_entries: 0,
     updated: 0,
@@ -48,13 +45,32 @@ export function push(repoPath: string): PushResult {
     deleted_links: 0,
   };
 
-  // Get all entries in the repo before push (to detect what's new vs updated)
-  const existingRepoIds = getRepoEntryIds(repoPath);
+  const touchedRepos = new Set<string>();
+
+  // Ensure repo structure for all configured repos
+  for (const repo of config.repos) {
+    if (existsSync(repo.path)) {
+      ensureRepoStructure(repo.path);
+    }
+  }
 
   // === Push entries ===
 
   const localEntries = getAllEntries();
   const localEntryIds = new Set<string>();
+
+  // Track which repo each entry belongs to (for deletion logic)
+  const entryRepoMap = new Map<string, string>();
+  
+  // Pre-load all repo states to correctly calculate new vs updated
+  const initialRepoState = new Map<string, Set<string>>(); // repoPath -> Set<id>
+  for (const repo of config.repos) {
+    if (existsSync(repo.path)) {
+      initialRepoState.set(repo.path, getRepoEntryIds(repo.path));
+    } else {
+      initialRepoState.set(repo.path, new Set());
+    }
+  }
 
   for (const entry of localEntries) {
     // Skip conflict entries — they're local-only resolution artifacts
@@ -62,37 +78,78 @@ export function push(repoPath: string): PushResult {
 
     localEntryIds.add(entry.id);
 
+    // Resolve target repo
+    const targetRepo = resolveRepoForScope(entry.scope, entry.project, config);
+    const repoPath = targetRepo.path;
+    entryRepoMap.set(entry.id, repoPath);
+
+    // Write file
     const json = entryToJSON(entry);
-
-    // If the entry type changed, delete the old file first
-    // (it might be in a different type directory)
-    if (existingRepoIds.has(entry.id)) {
-      deleteEntryFile(repoPath, entry.id);
-    }
-
     writeEntryFile(repoPath, json);
     updateSyncedAt(entry.id);
-
-    if (existingRepoIds.has(entry.id)) {
+    touchedRepos.add(repoPath);
+    
+    // Check if new or updated
+    const existingInTarget = initialRepoState.get(repoPath)?.has(entry.id);
+    if (existingInTarget) {
       result.updated++;
     } else {
-      result.new_entries++;
+      // Check if it existed in ANY repo (moved = updated, not new)
+      let existedAnywhere = false;
+      for (const ids of initialRepoState.values()) {
+        if (ids.has(entry.id)) {
+          existedAnywhere = true;
+          break;
+        }
+      }
+      if (existedAnywhere) {
+        result.updated++;
+      } else {
+        result.new_entries++;
+      }
     }
   }
 
-  // Delete entries from repo that no longer exist locally
-  for (const repoId of existingRepoIds) {
-    if (!localEntryIds.has(repoId)) {
-      deleteEntryFile(repoPath, repoId);
-      result.deleted++;
+  // === Clean up old files (moves, type changes, deletions) ===
+
+  for (const repo of config.repos) {
+    if (!existsSync(repo.path)) continue;
+
+    const repoIds = getRepoEntryIds(repo.path);
+    for (const id of repoIds) {
+      // If entry no longer exists locally, delete it
+      if (!localEntryIds.has(id)) {
+        deleteEntryFile(repo.path, id);
+        result.deleted++;
+        touchedRepos.add(repo.path);
+        continue;
+      }
+
+      // If entry exists locally but belongs to a DIFFERENT repo, delete it here (move)
+      const correctRepo = entryRepoMap.get(id);
+      if (correctRepo && correctRepo !== repo.path) {
+        deleteEntryFile(repo.path, id);
+        // Don't count as deleted since it's just moving
+        touchedRepos.add(repo.path);
+      }
     }
   }
 
   // === Push links ===
 
-  const existingLinkIds = getRepoLinkIds(repoPath);
   const localLinks = getAllLinks();
   const localLinkIds = new Set<string>();
+  const linkRepoMap = new Map<string, string>();
+
+  // Pre-load existing link IDs from all repos for new vs existing tracking
+  const initialLinkState = new Set<string>();
+  for (const repo of config.repos) {
+    if (existsSync(repo.path)) {
+      for (const id of getRepoLinkIds(repo.path)) {
+        initialLinkState.add(id);
+      }
+    }
+  }
 
   for (const link of localLinks) {
     // Skip conflict-related links
@@ -100,19 +157,49 @@ export function push(repoPath: string): PushResult {
 
     localLinkIds.add(link.id);
 
-    const json = linkToJSON(link);
-    writeLinkFile(repoPath, json);
+    // Resolve repo based on source entry's repo
+    const sourceRepo = entryRepoMap.get(link.source_id);
+    
+    if (sourceRepo) {
+      const json = linkToJSON(link);
+      writeLinkFile(sourceRepo, json);
+      linkRepoMap.set(link.id, sourceRepo);
+      touchedRepos.add(sourceRepo);
 
-    if (!existingLinkIds.has(link.id)) {
-      result.new_links++;
+      if (!initialLinkState.has(link.id)) {
+        result.new_links++;
+      }
     }
   }
 
-  // Delete links from repo that no longer exist locally
-  for (const repoLinkId of existingLinkIds) {
-    if (!localLinkIds.has(repoLinkId)) {
-      deleteLinkFile(repoPath, repoLinkId);
-      result.deleted_links++;
+  // === Clean up old link files ===
+
+  for (const repo of config.repos) {
+    if (!existsSync(repo.path)) continue;
+
+    const repoLinkIds = getRepoLinkIds(repo.path);
+    for (const id of repoLinkIds) {
+      if (!localLinkIds.has(id)) {
+        deleteLinkFile(repo.path, id);
+        result.deleted_links++;
+        touchedRepos.add(repo.path);
+        continue;
+      }
+
+      const correctRepo = linkRepoMap.get(id);
+      if (correctRepo && correctRepo !== repo.path) {
+        deleteLinkFile(repo.path, id);
+        touchedRepos.add(repo.path);
+      }
+    }
+  }
+
+  // === Commit and Push ===
+
+  for (const repoPath of touchedRepos) {
+    if (gitCommitAll(repoPath, 'knowledge: sync push')) {
+      // Only push if commit succeeded (meaning there were changes)
+      gitPush(repoPath);
     }
   }
 
