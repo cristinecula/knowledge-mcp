@@ -378,6 +378,12 @@ export function getLinkedEntries(entryId: string): KnowledgeEntry[] {
   return rows.map(rowToEntry);
 }
 
+export function deleteKnowledge(id: string): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM knowledge WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
 export function deleteLink(id: string): boolean {
   const db = getDb();
   const result = db

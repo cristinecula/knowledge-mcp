@@ -19,6 +19,7 @@ import { registerReinforceTool } from './tools/reinforce.js';
 import { registerDeprecateTool } from './tools/deprecate.js';
 import { registerLinkTool } from './tools/link.js';
 import { registerUpdateTool } from './tools/update.js';
+import { registerDeleteTool } from './tools/delete.js';
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
@@ -120,8 +121,9 @@ async function main(): Promise<void> {
   registerDeprecateTool(server);
   registerLinkTool(server);
   registerUpdateTool(server);
+  registerDeleteTool(server);
 
-  console.error('7 tools registered');
+  console.error('8 tools registered');
 
   // Start graph visualization server
   if (!noGraph) {

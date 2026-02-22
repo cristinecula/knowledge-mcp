@@ -44,3 +44,14 @@ export function closeDb(): void {
     db = null;
   }
 }
+
+/**
+ * Reset the database connection. Closes the existing connection (if any)
+ * and creates a fresh one at the given path.
+ *
+ * Primarily used for testing — pass ':memory:' for an isolated in-memory DB.
+ */
+export function resetDb(dbPath?: string): Database.Database {
+  closeDb();
+  return getDb(dbPath ?? ':memory:');
+}
