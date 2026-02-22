@@ -17,10 +17,12 @@ export function initSchema(db: Database.Database): void {
       source TEXT NOT NULL DEFAULT 'unknown',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      content_updated_at TEXT NOT NULL DEFAULT '',
       last_accessed_at TEXT NOT NULL,
       access_count INTEGER NOT NULL DEFAULT 0,
       strength REAL NOT NULL DEFAULT 1.0,
-      status TEXT NOT NULL DEFAULT 'active'
+      status TEXT NOT NULL DEFAULT 'active',
+      synced_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_type ON knowledge(type);
@@ -58,6 +60,9 @@ export function initSchema(db: Database.Database): void {
     );
   `);
 
+  // Migrate existing databases: add content_updated_at if missing
+  migrateSchema(db);
+
   // FTS5 virtual table — check if it exists first
   const ftsExists = db
     .prepare(
@@ -94,4 +99,31 @@ export function initSchema(db: Database.Database): void {
       END;
     `);
   }
+}
+
+/**
+ * Run schema migrations for existing databases.
+ * Each migration checks if it's needed before applying.
+ */
+function migrateSchema(db: Database.Database): void {
+  const columns = db.prepare('PRAGMA table_info(knowledge)').all() as Array<{
+    name: string;
+  }>;
+  const columnNames = new Set(columns.map((c) => c.name));
+
+  // Migration 1: Add content_updated_at column
+  if (!columnNames.has('content_updated_at')) {
+    db.exec(`
+      ALTER TABLE knowledge ADD COLUMN content_updated_at TEXT NOT NULL DEFAULT '';
+      UPDATE knowledge SET content_updated_at = updated_at WHERE content_updated_at = '';
+    `);
+  }
+
+  // Migration 2: Add synced_at column
+  if (!columnNames.has('synced_at')) {
+    db.exec(`ALTER TABLE knowledge ADD COLUMN synced_at TEXT`);
+  }
+
+  // Backfill: ensure content_updated_at is set for any rows where it's empty
+  db.exec(`UPDATE knowledge SET content_updated_at = updated_at WHERE content_updated_at = ''`);
 }

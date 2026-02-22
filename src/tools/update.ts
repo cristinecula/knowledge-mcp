@@ -8,6 +8,7 @@ import {
   updateStatus,
 } from '../db/queries.js';
 import { embedAndStore } from '../embeddings/similarity.js';
+import { syncWriteEntry } from '../sync/index.js';
 
 export function registerUpdateTool(server: McpServer): void {
   server.registerTool(
@@ -56,6 +57,8 @@ export function registerUpdateTool(server: McpServer): void {
           };
         }
 
+        const oldType = entry.type;
+
         // Apply updates
         const updated = updateKnowledgeFields(id, {
           title,
@@ -97,6 +100,9 @@ export function registerUpdateTool(server: McpServer): void {
             revalidatedIds.push(link.source_id);
           }
         }
+
+        // Write-through to sync repo (pass old type for file cleanup on type change)
+        if (updated) syncWriteEntry(updated, type !== undefined ? oldType : undefined);
 
         return {
           content: [

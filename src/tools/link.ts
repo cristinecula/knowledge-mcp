@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { LINK_TYPES } from '../types.js';
 import { getKnowledgeById, insertLink, updateStatus } from '../db/queries.js';
+import { syncWriteLink } from '../sync/index.js';
 
 export function registerLinkTool(server: McpServer): void {
   server.registerTool(
@@ -82,6 +83,9 @@ export function registerLinkTool(server: McpServer): void {
           source,
         });
 
+        // Write-through to sync repo
+        syncWriteLink(link);
+
         // Flag target for revalidation when superseded
         let targetRevalidated = false;
         if (link_type === 'supersedes') {
@@ -113,6 +117,7 @@ export function registerLinkTool(server: McpServer): void {
               description,
               source,
             });
+            syncWriteLink(reverseLink);
             result.reverse_link_id = reverseLink.id;
             result.bidirectional = true;
           } catch {

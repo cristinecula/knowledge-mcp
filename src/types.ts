@@ -55,10 +55,12 @@ export interface KnowledgeEntry {
   source: string;
   created_at: string;
   updated_at: string;
+  content_updated_at: string;
   last_accessed_at: string;
   access_count: number;
   strength: number;
   status: Status;
+  synced_at: string | null;
 }
 
 /** Row shape as stored in SQLite (tags is a JSON string) */
@@ -73,10 +75,12 @@ export interface KnowledgeRow {
   source: string;
   created_at: string;
   updated_at: string;
+  content_updated_at: string;
   last_accessed_at: string;
   access_count: number;
   strength: number;
   status: string;
+  synced_at: string | null;
 }
 
 export interface KnowledgeLink {

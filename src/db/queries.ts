@@ -31,8 +31,8 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
   const id = randomUUID();
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, last_accessed_at, access_count, strength, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active')
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active', NULL)
   `);
 
   stmt.run(
@@ -44,6 +44,7 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
     params.project ?? null,
     params.scope ?? 'company',
     params.source ?? 'unknown',
+    now,
     now,
     now,
     now,
@@ -75,8 +76,8 @@ export function updateKnowledgeFields(
   const db = getDb();
   const now = new Date().toISOString();
 
-  const sets: string[] = ['updated_at = ?'];
-  const values: unknown[] = [now];
+  const sets: string[] = ['updated_at = ?', 'content_updated_at = ?'];
+  const values: unknown[] = [now, now];
 
   if (fields.title !== undefined) {
     sets.push('title = ?');
@@ -515,4 +516,162 @@ export function getGraphData(): GraphData {
       description: l.description,
     })),
   };
+}
+
+// === Sync helpers ===
+
+/** Update synced_at timestamp for an entry */
+export function updateSyncedAt(id: string, timestamp?: string): void {
+  const db = getDb();
+  const ts = timestamp ?? new Date().toISOString();
+  db.prepare('UPDATE knowledge SET synced_at = ? WHERE id = ?').run(ts, id);
+}
+
+/** Insert a knowledge entry with a specific ID (used during sync import) */
+export interface ImportKnowledgeParams {
+  id: string;
+  type: KnowledgeType;
+  title: string;
+  content: string;
+  tags?: string[];
+  project?: string | null;
+  scope?: Scope;
+  source?: string;
+  status?: Status;
+  created_at: string;
+  updated_at: string;
+}
+
+export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const stmt = db.prepare(`
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?)
+  `);
+
+  stmt.run(
+    params.id,
+    params.type,
+    params.title,
+    params.content,
+    JSON.stringify(params.tags ?? []),
+    params.project ?? null,
+    params.scope ?? 'company',
+    params.source ?? 'unknown',
+    params.created_at,
+    params.updated_at,
+    params.updated_at,   // content_updated_at = updated_at for imports
+    now,                  // last_accessed_at = now (personal)
+    params.status ?? 'active',
+    now,                  // synced_at = now
+  );
+
+  return getKnowledgeById(params.id)!;
+}
+
+/** Insert a link with a specific ID (used during sync import) */
+export interface ImportLinkParams {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  linkType: LinkType;
+  description?: string;
+  source?: string;
+  created_at: string;
+}
+
+export function importLink(params: ImportLinkParams): KnowledgeLink | null {
+  const db = getDb();
+
+  try {
+    db.prepare(
+      `INSERT INTO knowledge_links (id, source_id, target_id, link_type, description, created_at, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      params.id,
+      params.sourceId,
+      params.targetId,
+      params.linkType,
+      params.description ?? null,
+      params.created_at,
+      params.source ?? 'unknown',
+    );
+    return getLinkById(params.id);
+  } catch (error) {
+    // Silently skip duplicate links (UNIQUE constraint violation)
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('UNIQUE constraint')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Update shared content fields of an entry (used during sync merge) */
+export function updateKnowledgeContent(
+  id: string,
+  fields: {
+    type?: KnowledgeType;
+    title?: string;
+    content?: string;
+    tags?: string[];
+    project?: string | null;
+    scope?: Scope;
+    source?: string;
+    status?: Status;
+    updated_at?: string;
+  },
+): KnowledgeEntry | null {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  const sets: string[] = ['content_updated_at = ?', 'synced_at = ?'];
+  const values: unknown[] = [now, now];
+
+  if (fields.type !== undefined) {
+    sets.push('type = ?');
+    values.push(fields.type);
+  }
+  if (fields.title !== undefined) {
+    sets.push('title = ?');
+    values.push(fields.title);
+  }
+  if (fields.content !== undefined) {
+    sets.push('content = ?');
+    values.push(fields.content);
+  }
+  if (fields.tags !== undefined) {
+    sets.push('tags = ?');
+    values.push(JSON.stringify(fields.tags));
+  }
+  if (fields.project !== undefined) {
+    sets.push('project = ?');
+    values.push(fields.project);
+  }
+  if (fields.scope !== undefined) {
+    sets.push('scope = ?');
+    values.push(fields.scope);
+  }
+  if (fields.source !== undefined) {
+    sets.push('source = ?');
+    values.push(fields.source);
+  }
+  if (fields.status !== undefined) {
+    sets.push('status = ?');
+    values.push(fields.status);
+  }
+  if (fields.updated_at !== undefined) {
+    sets.push('updated_at = ?');
+    values.push(fields.updated_at);
+  }
+
+  values.push(id);
+
+  db.prepare(`UPDATE knowledge SET ${sets.join(', ')} WHERE id = ?`).run(
+    ...values,
+  );
+
+  return getKnowledgeById(id);
 }

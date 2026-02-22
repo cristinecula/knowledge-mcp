@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getKnowledgeById, deleteKnowledge } from '../db/queries.js';
-import { deleteEmbedding } from '../db/queries.js';
+import { getKnowledgeById, deleteKnowledge, deleteEmbedding } from '../db/queries.js';
+import { syncDeleteEntry } from '../sync/index.js';
 
 export function registerDeleteTool(server: McpServer): void {
   server.registerTool(
@@ -32,6 +32,9 @@ export function registerDeleteTool(server: McpServer): void {
 
         // Delete embedding first (before CASCADE removes the foreign key target)
         deleteEmbedding(id);
+
+        // Delete from sync repo first (before local data is gone)
+        syncDeleteEntry(id, entry.type);
 
         // Delete the entry (CASCADE handles links, FTS trigger handles search index)
         const deleted = deleteKnowledge(id);

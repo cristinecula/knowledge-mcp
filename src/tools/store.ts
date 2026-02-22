@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { KNOWLEDGE_TYPES, SCOPES, LINK_TYPES } from '../types.js';
 import { insertKnowledge, insertLink, getKnowledgeById, updateStatus } from '../db/queries.js';
 import { embedAndStore } from '../embeddings/similarity.js';
+import { syncWriteEntry, syncWriteLink } from '../sync/index.js';
 
 export function registerStoreTool(server: McpServer): void {
   server.registerTool(
@@ -87,6 +88,9 @@ export function registerStoreTool(server: McpServer): void {
               }
             }
 
+            // Write-through link to sync repo
+            syncWriteLink(createdLink);
+
             createdLinks.push({
               link_id: createdLink.id,
               target_id: link.target_id,
@@ -102,6 +106,10 @@ export function registerStoreTool(server: McpServer): void {
         } catch (embedError) {
           console.error('Warning: failed to generate embedding:', embedError);
         }
+
+        // Write-through to sync repo
+        const storedEntry = getKnowledgeById(entry.id);
+        if (storedEntry) syncWriteEntry(storedEntry);
 
         const result: Record<string, unknown> = {
           id: entry.id,

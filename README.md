@@ -13,8 +13,8 @@ Built for teams where multiple agents work across many repositories. Store conve
 - **Semantic search** — Optional vector similarity search using local embeddings or OpenAI. Results are merged with keyword search via Reciprocal Rank Fusion.
 - **Knowledge graph visualization** — Built-in D3.js force-directed graph UI served on `localhost:3333`.
 - **Hierarchical scoping** — Entries can be scoped to company, project, or repo. Queries inherit upward (repo queries include project and company knowledge).
-- **8 MCP tools** — Store, query, list, reinforce, deprecate, link, update, and delete knowledge.
-- **Sync-ready data model** — UUIDs, timestamps, and source tracking are designed for future team sync.
+- **Git-based team sync** — Share knowledge across a team via a git repo. JSON files are the source of truth; local SQLite acts as a personal index. Conflict detection keeps both versions and lets agents resolve naturally.
+- **9 MCP tools** — Store, query, list, reinforce, deprecate, link, update, delete, and sync knowledge.
 
 ## Installation
 
@@ -40,6 +40,23 @@ Add to your MCP client configuration (e.g., Claude Desktop `claude_desktop_confi
     "command": [
       "node",
       "/path/to/knowledge-mcp/build/index.js"
+    ],
+    "enabled": true
+  }
+}
+```
+
+With git sync enabled:
+
+```json
+{
+  "knowledge": {
+    "type": "local",
+    "command": [
+      "node",
+      "/path/to/knowledge-mcp/build/index.js",
+      "--sync-repo",
+      "/path/to/shared-knowledge-repo"
     ],
     "enabled": true
   }
@@ -73,6 +90,7 @@ With semantic search enabled (local embeddings):
 | `--embedding-provider <type>` | Embedding provider: `none`, `local`, or `openai` | `none` |
 | `--openai-api-key <key>` | API key for OpenAI embeddings (or set `OPENAI_API_KEY` env var) | — |
 | `--embedding-model <model>` | Override the default embedding model | Provider default |
+| `--sync-repo <path>` | Path to a git repo for team knowledge sync | — |
 | `--backfill-embeddings` | Generate embeddings for all existing entries on startup | — |
 | `--help` | Show help message | — |
 
@@ -110,6 +128,62 @@ Create typed links between entries. Supports bidirectional linking. Link types: 
 ### `update_knowledge`
 Update an entry's content, title, tags, type, project, or scope. Automatically triggers cascade revalidation on dependent entries and re-generates embeddings.
 
+### `sync_knowledge`
+Manually trigger a sync with the git repo. Supports `pull` (import remote changes), `push` (export local changes), or `both`. Only available when `--sync-repo` is configured.
+
+## Git Sync
+
+The sync layer enables team knowledge sharing via a shared git repository. Each team member runs their own local instance with `--sync-repo` pointing to a shared repo.
+
+### How it works
+
+- **Source of truth:** JSON files in the git repo (`entries/{type}/{id}.json`, `links/{id}.json`)
+- **Local DB:** SQLite acts as a personal index/cache. Memory fields (strength, access count, last accessed) stay local — each person's memory is personal.
+- **Write-through:** Every local write (store, update, delete, link, deprecate) is immediately written to the repo as JSON files.
+- **Pull on startup:** When the server starts, it pulls all changes from the repo into the local DB.
+- **Manual sync:** Use the `sync_knowledge` tool to pull/push mid-session.
+- **Git operations:** The sync layer does NOT run git commands. You manage `git add/commit/push/pull` yourself (or let your agent do it).
+
+### Conflict resolution
+
+When both local and remote have changed since last sync:
+
+1. The local entry is flagged as `needs_revalidation`
+2. A new `[Sync Conflict]` entry is created containing the remote version
+3. A `contradicts` link is created between the conflict entry and the original
+4. Both are flagged `needs_revalidation`
+5. The agent resolves naturally by reviewing both versions and keeping the correct one
+
+### Repo structure
+
+```
+shared-knowledge-repo/
+  entries/
+    convention/
+      {id}.json
+    decision/
+      {id}.json
+    pattern/
+      {id}.json
+    ...
+  links/
+    {id}.json
+```
+
+### Setup
+
+```bash
+# Create the shared repo
+mkdir shared-knowledge && cd shared-knowledge && git init
+
+# Start the server with sync
+node build/index.js --sync-repo /path/to/shared-knowledge
+
+# After making changes, commit and push
+cd /path/to/shared-knowledge
+git add -A && git commit -m "sync knowledge" && git push
+```
+
 ## Architecture
 
 ### Memory Model
@@ -143,7 +217,7 @@ finalStrength = baseStrength + min(networkBonus, baseStrength * 0.5)
 - **knowledge_links** — Typed associations between entries (unique constraint on source + target + type)
 - **knowledge_embeddings** — Vector embeddings for semantic search
 
-All tables use UUID primary keys and ISO 8601 timestamps, designed for future sync support.
+All tables use UUID primary keys and ISO 8601 timestamps. The `content_updated_at` column tracks content changes for sync conflict detection, and `synced_at` records when an entry was last synced with the repo.
 
 ### Scoping
 
@@ -201,6 +275,15 @@ src/
     delete.ts           # delete_knowledge
     link.ts             # link_knowledge
     update.ts           # update_knowledge
+    sync.ts             # sync_knowledge
+  sync/
+    config.ts           # Sync repo path management
+    serialize.ts        # Entry/link JSON serialization
+    fs.ts               # Repo file I/O (read, write, delete, list)
+    merge.ts            # Conflict detection (no_change, remote_wins, local_wins, conflict)
+    pull.ts             # Import remote changes, handle conflicts
+    push.ts             # Export local entries/links to repo
+    write-through.ts    # Immediate sync on local writes
   embeddings/
     provider.ts         # Embedding provider interface + factory
     local.ts            # Local provider (@xenova/transformers)
@@ -211,10 +294,11 @@ src/
     handler.ts          # API routes + static file serving
     static/             # D3.js graph UI (HTML, JS, CSS)
   __tests__/
-    db.test.ts          # Database layer tests
-    memory.test.ts      # Memory model tests
-    tools.test.ts       # Tool integration tests
-    similarity.test.ts  # Similarity/RRF math tests
+    db.test.ts          # Database layer tests (50 tests)
+    memory.test.ts      # Memory model tests (15 tests)
+    tools.test.ts       # Tool integration tests (26 tests)
+    similarity.test.ts  # Similarity/RRF math tests (12 tests)
+    sync.test.ts        # Sync layer tests (32 tests)
 ```
 
 ## License

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getKnowledgeById, updateStatus, updateKnowledgeFields } from '../db/queries.js';
+import { syncWriteEntry } from '../sync/index.js';
 
 export function registerDeprecateTool(server: McpServer): void {
   server.registerTool(
@@ -59,6 +60,10 @@ export function registerDeprecateTool(server: McpServer): void {
             entry.content + `\n\n---\n**Deprecated:** ${reason}`;
           updateKnowledgeFields(id, { content: updatedContent });
         }
+
+        // Write-through to sync repo
+        const deprecatedEntry = getKnowledgeById(id);
+        if (deprecatedEntry) syncWriteEntry(deprecatedEntry);
 
         return {
           content: [

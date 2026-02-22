@@ -20,6 +20,8 @@ import { registerDeprecateTool } from './tools/deprecate.js';
 import { registerLinkTool } from './tools/link.js';
 import { registerUpdateTool } from './tools/update.js';
 import { registerDeleteTool } from './tools/delete.js';
+import { registerSyncTool } from './tools/sync.js';
+import { setSyncRepo, isSyncEnabled, pull, ensureRepoStructure } from './sync/index.js';
 
 // Parse CLI arguments
 const args = process.argv.slice(2);
@@ -30,6 +32,7 @@ let embeddingProviderType: EmbeddingProviderType = 'none';
 let openaiApiKey: string | undefined;
 let embeddingModel: string | undefined;
 let backfill = false;
+let syncRepoPath: string | undefined;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--db-path' && args[i + 1]) {
@@ -46,6 +49,8 @@ for (let i = 0; i < args.length; i++) {
     embeddingModel = args[++i];
   } else if (args[i] === '--backfill-embeddings') {
     backfill = true;
+  } else if (args[i] === '--sync-repo' && args[i + 1]) {
+    syncRepoPath = args[++i];
   } else if (args[i] === '--help') {
     console.error(`
 knowledge-mcp — Shared Agent Knowledge System (MCP Server)
@@ -61,6 +66,7 @@ Options:
   --openai-api-key <key>        API key for OpenAI embeddings (or set OPENAI_API_KEY env var)
   --embedding-model <model>     Override the default embedding model
   --backfill-embeddings         Generate embeddings for all existing entries on startup
+  --sync-repo <path>            Path to git repo for knowledge sharing (enables sync)
   --help                        Show this help message
 `);
     process.exit(0);
@@ -77,6 +83,31 @@ async function main(): Promise<void> {
   console.error(
     `Maintenance sweep: ${sweep.processed} entries processed, ${sweep.transitioned} transitioned to dormant`,
   );
+
+  // Initialize sync repo (if configured)
+  if (syncRepoPath) {
+    setSyncRepo(syncRepoPath);
+    ensureRepoStructure(syncRepoPath);
+    console.error(`Sync repo: ${syncRepoPath}`);
+
+    // Pull on startup
+    try {
+      const pullResult = await pull(syncRepoPath);
+      console.error(
+        `Sync pull: ${pullResult.new_entries} new, ${pullResult.updated} updated, ` +
+        `${pullResult.deleted} deleted, ${pullResult.conflicts} conflicts, ` +
+        `${pullResult.new_links} new links, ${pullResult.deleted_links} deleted links`,
+      );
+      if (pullResult.conflicts > 0) {
+        console.error(`  Conflicts need resolution — check entries with needs_revalidation status`);
+      }
+    } catch (error) {
+      console.error(
+        `Warning: Sync pull failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      console.error('Continuing without sync pull.');
+    }
+  }
 
   // Initialize embedding provider (if configured)
   if (embeddingProviderType !== 'none') {
@@ -122,8 +153,10 @@ async function main(): Promise<void> {
   registerLinkTool(server);
   registerUpdateTool(server);
   registerDeleteTool(server);
+  registerSyncTool(server);
 
-  console.error('8 tools registered');
+  const toolCount = isSyncEnabled() ? '9 tools registered (sync enabled)' : '9 tools registered (sync disabled)';
+  console.error(toolCount);
 
   // Start graph visualization server
   if (!noGraph) {
