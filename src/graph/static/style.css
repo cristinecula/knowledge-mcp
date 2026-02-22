@@ -1,0 +1,303 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* --- Graph Canvas --- */
+#graph-container {
+  flex: 1;
+  position: relative;
+}
+
+svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* --- Controls Bar --- */
+#controls {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  z-index: 10;
+}
+
+#controls select,
+#controls button {
+  background: #161b22;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#controls select:hover,
+#controls button:hover {
+  border-color: #58a6ff;
+}
+
+#controls button.active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+
+/* --- Stats Bar --- */
+#stats {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  font-size: 12px;
+  color: #8b949e;
+  z-index: 10;
+}
+
+/* --- Sidebar --- */
+#sidebar {
+  width: 380px;
+  background: #161b22;
+  border-left: 1px solid #30363d;
+  overflow-y: auto;
+  padding: 20px;
+  display: none;
+  flex-direction: column;
+  gap: 16px;
+}
+
+#sidebar.open {
+  display: flex;
+}
+
+#sidebar-close {
+  align-self: flex-end;
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+#sidebar-close:hover {
+  color: #c9d1d9;
+}
+
+#sidebar h2 {
+  font-size: 18px;
+  color: #f0f6fc;
+  margin-bottom: 4px;
+}
+
+#sidebar .entry-type {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#sidebar .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+#sidebar .meta span {
+  background: #21262d;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+#sidebar .content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #c9d1d9;
+  background: #0d1117;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+#sidebar .tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+#sidebar .tag {
+  background: #1f6feb22;
+  color: #58a6ff;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+#sidebar .links-section h3 {
+  font-size: 14px;
+  color: #8b949e;
+  margin-bottom: 8px;
+}
+
+#sidebar .link-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #0d1117;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#sidebar .link-item:hover {
+  background: #21262d;
+}
+
+#sidebar .link-type-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+#sidebar .strength-bar {
+  width: 100%;
+  height: 6px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#sidebar .strength-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+#sidebar .status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-active { background: #23863622; color: #3fb950; }
+.status-dormant { background: #8b949e22; color: #8b949e; }
+.status-deprecated { background: #f8514922; color: #f85149; }
+.status-needs_revalidation { background: #d2992222; color: #d29922; }
+
+/* --- Node labels on graph --- */
+.node-label {
+  font-size: 11px;
+  fill: #8b949e;
+  pointer-events: none;
+  text-anchor: middle;
+}
+
+/* --- Tooltip --- */
+#tooltip {
+  position: absolute;
+  background: #21262d;
+  border: 1px solid #30363d;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  display: none;
+  z-index: 100;
+  max-width: 300px;
+}
+
+#tooltip .tt-title {
+  font-weight: 600;
+  color: #f0f6fc;
+}
+
+#tooltip .tt-meta {
+  color: #8b949e;
+  margin-top: 2px;
+}
+
+/* --- Pulsing animation for needs_revalidation --- */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* --- Legend --- */
+#legend {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 11px;
+  z-index: 10;
+}
+
+#legend h4 {
+  color: #8b949e;
+  margin-bottom: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+#legend .legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+#legend .legend-line {
+  width: 20px;
+  height: 2px;
+}
+
+#legend .legend-section {
+  margin-bottom: 12px;
+}
+
+#legend .legend-section:last-child {
+  margin-bottom: 0;
+}

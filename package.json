@@ -1,0 +1,35 @@
+{
+  "name": "knowledge-mcp",
+  "version": "1.0.0",
+  "description": "A shared agent knowledge system with brain-inspired memory decay, associative linking, and knowledge graph visualization — exposed as an MCP server.",
+  "type": "module",
+  "bin": {
+    "knowledge-mcp": "./build/index.js"
+  },
+  "scripts": {
+    "build": "tsc && cp -r src/graph/static build/graph/static && chmod 755 build/index.js",
+    "start": "node build/index.js",
+    "dev": "tsc --watch"
+  },
+  "files": [
+    "build"
+  ],
+  "keywords": [
+    "mcp",
+    "knowledge",
+    "agent",
+    "memory",
+    "knowledge-graph"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "better-sqlite3": "^11.0.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
