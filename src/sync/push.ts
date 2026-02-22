@@ -197,10 +197,10 @@ export function push(config: import('./routing.js').SyncConfig): PushResult {
   // === Commit and Push ===
 
   for (const repoPath of touchedRepos) {
-    if (gitCommitAll(repoPath, 'knowledge: sync push')) {
-      // Only push if commit succeeded (meaning there were changes)
-      gitPush(repoPath);
-    }
+    // Commit any remaining changes (may be a no-op if write-through already committed)
+    gitCommitAll(repoPath, 'knowledge: sync push');
+    // Always push — there may be unpushed write-through commits
+    gitPush(repoPath);
   }
 
   return result;
