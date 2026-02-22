@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { KNOWLEDGE_TYPES, SCOPES } from '../types.js';
 import { searchKnowledge, recordAccess, getLinksForEntry } from '../db/queries.js';
+import { getEmbeddingProvider } from '../embeddings/provider.js';
+import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
 
 export function registerQueryTool(server: McpServer): void {
   server.registerTool(
@@ -28,17 +30,58 @@ export function registerQueryTool(server: McpServer): void {
     },
     async ({ query, type, tags, project, scope, include_weak, limit }) => {
       try {
-        const entries = searchKnowledge({
+        const maxResults = limit ?? 10;
+
+        // 1. FTS5 keyword search
+        const ftsEntries = searchKnowledge({
           query,
           type,
           tags,
           project,
           scope,
           includeWeak: include_weak,
-          limit,
+          limit: maxResults * 2, // fetch more for merging
         });
 
-        if (entries.length === 0) {
+        // 2. Semantic vector search (if embedding provider is configured)
+        let finalEntries = ftsEntries;
+        const provider = getEmbeddingProvider();
+
+        if (provider && query) {
+          try {
+            // Get a broad set of candidates for vector search (filtered by params)
+            const candidates = searchKnowledge({
+              type,
+              tags,
+              project,
+              scope,
+              includeWeak: include_weak,
+              limit: 200, // broad pool for vector search
+            });
+
+            const vecResults = await vectorSearch(query, candidates, maxResults * 2);
+
+            if (vecResults.length > 0) {
+              // Convert FTS results to ScoredEntry format
+              const ftsScored: ScoredEntry[] = ftsEntries.map((entry, i) => ({
+                entry,
+                score: 1 / (i + 1), // rank-based score
+              }));
+
+              // Merge via Reciprocal Rank Fusion
+              const merged = reciprocalRankFusion(ftsScored, vecResults);
+              finalEntries = merged.slice(0, maxResults).map((m) => m.entry);
+            }
+          } catch (vecError) {
+            // Fall back to FTS-only results if vector search fails
+            console.error('Warning: vector search failed, using FTS only:', vecError);
+          }
+        }
+
+        // Trim to limit
+        finalEntries = finalEntries.slice(0, maxResults);
+
+        if (finalEntries.length === 0) {
           return {
             content: [
               {
@@ -50,12 +93,12 @@ export function registerQueryTool(server: McpServer): void {
         }
 
         // Auto-reinforce: bump access count for returned entries
-        for (const entry of entries) {
+        for (const entry of finalEntries) {
           recordAccess(entry.id, 1);
         }
 
         // Enrich with link info
-        const results = entries.map((entry) => {
+        const results = finalEntries.map((entry) => {
           const links = getLinksForEntry(entry.id);
           return {
             id: entry.id,

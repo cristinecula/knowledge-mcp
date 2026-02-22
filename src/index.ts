@@ -5,6 +5,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { getDb, closeDb } from './db/connection.js';
 import { runMaintenanceSweep } from './memory/maintenance.js';
 import { startGraphServer, stopGraphServer } from './graph/server.js';
+import {
+  createEmbeddingProvider,
+  setEmbeddingProvider,
+  type EmbeddingProviderType,
+} from './embeddings/provider.js';
+import { backfillEmbeddings } from './embeddings/similarity.js';
+import { getAllEntries } from './db/queries.js';
 import { registerStoreTool } from './tools/store.js';
 import { registerQueryTool } from './tools/query.js';
 import { registerListTool } from './tools/list.js';
@@ -18,6 +25,10 @@ const args = process.argv.slice(2);
 let dbPath: string | undefined;
 let graphPort = 3333;
 let noGraph = false;
+let embeddingProviderType: EmbeddingProviderType = 'none';
+let openaiApiKey: string | undefined;
+let embeddingModel: string | undefined;
+let backfill = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--db-path' && args[i + 1]) {
@@ -26,6 +37,14 @@ for (let i = 0; i < args.length; i++) {
     graphPort = parseInt(args[++i], 10);
   } else if (args[i] === '--no-graph') {
     noGraph = true;
+  } else if (args[i] === '--embedding-provider' && args[i + 1]) {
+    embeddingProviderType = args[++i] as EmbeddingProviderType;
+  } else if (args[i] === '--openai-api-key' && args[i + 1]) {
+    openaiApiKey = args[++i];
+  } else if (args[i] === '--embedding-model' && args[i + 1]) {
+    embeddingModel = args[++i];
+  } else if (args[i] === '--backfill-embeddings') {
+    backfill = true;
   } else if (args[i] === '--help') {
     console.error(`
 knowledge-mcp — Shared Agent Knowledge System (MCP Server)
@@ -34,10 +53,14 @@ Usage:
   knowledge-mcp [options]
 
 Options:
-  --db-path <path>     Path to SQLite database (default: ~/.knowledge-mcp/knowledge.db)
-  --graph-port <port>  Port for knowledge graph visualization (default: 3333)
-  --no-graph           Disable the graph visualization server
-  --help               Show this help message
+  --db-path <path>              Path to SQLite database (default: ~/.knowledge-mcp/knowledge.db)
+  --graph-port <port>           Port for knowledge graph visualization (default: 3333)
+  --no-graph                    Disable the graph visualization server
+  --embedding-provider <type>   Embedding provider: none (default), local, or openai
+  --openai-api-key <key>        API key for OpenAI embeddings (or set OPENAI_API_KEY env var)
+  --embedding-model <model>     Override the default embedding model
+  --backfill-embeddings         Generate embeddings for all existing entries on startup
+  --help                        Show this help message
 `);
     process.exit(0);
   }
@@ -53,6 +76,35 @@ async function main(): Promise<void> {
   console.error(
     `Maintenance sweep: ${sweep.processed} entries processed, ${sweep.transitioned} transitioned to dormant`,
   );
+
+  // Initialize embedding provider (if configured)
+  if (embeddingProviderType !== 'none') {
+    try {
+      const provider = await createEmbeddingProvider(embeddingProviderType, {
+        apiKey: openaiApiKey,
+        model: embeddingModel,
+      });
+      setEmbeddingProvider(provider);
+      console.error(
+        `Embedding provider: ${provider!.name} (model: ${provider!.model}, ${provider!.dimensions}d)`,
+      );
+
+      // Backfill embeddings for existing entries if requested
+      if (backfill) {
+        console.error('Backfilling embeddings for existing entries...');
+        const entries = getAllEntries();
+        const result = await backfillEmbeddings(entries);
+        console.error(
+          `Backfill complete: ${result.processed} generated, ${result.skipped} already existed`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Warning: Failed to initialize embedding provider: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      console.error('Continuing without semantic search.');
+    }
+  }
 
   // Create MCP server
   const server = new McpServer({

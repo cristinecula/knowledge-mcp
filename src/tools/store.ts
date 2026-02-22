@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { KNOWLEDGE_TYPES, SCOPES, LINK_TYPES } from '../types.js';
 import { insertKnowledge, insertLink, getKnowledgeById } from '../db/queries.js';
+import { embedAndStore } from '../embeddings/similarity.js';
 
 export function registerStoreTool(server: McpServer): void {
   server.registerTool(
@@ -78,6 +79,13 @@ export function registerStoreTool(server: McpServer): void {
               link_type: link.link_type,
             });
           }
+        }
+
+        // Generate and store embedding (if provider configured)
+        try {
+          await embedAndStore(entry.id, entry.title, entry.content, entry.tags);
+        } catch (embedError) {
+          console.error('Warning: failed to generate embedding:', embedError);
         }
 
         const result: Record<string, unknown> = {

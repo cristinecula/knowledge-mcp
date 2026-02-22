@@ -7,6 +7,7 @@ import {
   getIncomingLinks,
   updateStatus,
 } from '../db/queries.js';
+import { embedAndStore } from '../embeddings/similarity.js';
 
 export function registerUpdateTool(server: McpServer): void {
   server.registerTool(
@@ -64,6 +65,20 @@ export function registerUpdateTool(server: McpServer): void {
           project,
           scope,
         });
+
+        // Re-generate embedding if title, content, or tags changed
+        if (title !== undefined || content !== undefined || tags !== undefined) {
+          try {
+            await embedAndStore(
+              updated!.id,
+              updated!.title,
+              updated!.content,
+              updated!.tags,
+            );
+          } catch (embedError) {
+            console.error('Warning: failed to regenerate embedding:', embedError);
+          }
+        }
 
         // Cascade revalidation: flag entries that derived from or depend on the updated entry.
         // These are entries where the updated entry is the TARGET of a derived/depends link

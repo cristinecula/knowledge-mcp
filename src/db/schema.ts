@@ -46,6 +46,16 @@ export function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_links_source ON knowledge_links(source_id);
     CREATE INDEX IF NOT EXISTS idx_links_target ON knowledge_links(target_id);
     CREATE INDEX IF NOT EXISTS idx_links_type ON knowledge_links(link_type);
+
+    CREATE TABLE IF NOT EXISTS knowledge_embeddings (
+      entry_id TEXT PRIMARY KEY,
+      embedding BLOB NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+
+      FOREIGN KEY (entry_id) REFERENCES knowledge(id) ON DELETE CASCADE
+    );
   `);
 
   // FTS5 virtual table — check if it exists first

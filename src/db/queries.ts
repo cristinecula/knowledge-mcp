@@ -404,6 +404,53 @@ export function getAllLinks(): KnowledgeLink[] {
   return rows.map(rowToLink);
 }
 
+// === Embeddings ===
+
+export interface EmbeddingRow {
+  entry_id: string;
+  embedding: Buffer;
+  model: string;
+  dimensions: number;
+  created_at: string;
+}
+
+export function storeEmbedding(
+  entryId: string,
+  embedding: Buffer,
+  model: string,
+  dimensions: number,
+): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  db.prepare(
+    `INSERT OR REPLACE INTO knowledge_embeddings (entry_id, embedding, model, dimensions, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(entryId, embedding, model, dimensions, now);
+}
+
+export function getEmbedding(entryId: string): EmbeddingRow | null {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT * FROM knowledge_embeddings WHERE entry_id = ?')
+    .get(entryId) as EmbeddingRow | undefined;
+  return row ?? null;
+}
+
+export function getAllEmbeddings(): EmbeddingRow[] {
+  const db = getDb();
+  return db
+    .prepare('SELECT * FROM knowledge_embeddings')
+    .all() as EmbeddingRow[];
+}
+
+export function deleteEmbedding(entryId: string): void {
+  const db = getDb();
+  db.prepare('DELETE FROM knowledge_embeddings WHERE entry_id = ?').run(
+    entryId,
+  );
+}
+
 // === Graph data ===
 
 export interface GraphData {
