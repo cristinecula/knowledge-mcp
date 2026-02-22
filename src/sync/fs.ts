@@ -5,6 +5,10 @@
  *   entries/{type}/{id}.json
  *   links/{id}.json
  *   meta.json
+ *
+ * SECURITY: All file path construction validates that the resolved path
+ * stays within the repo root directory. This prevents path traversal
+ * attacks via crafted IDs or types in repo JSON files.
  */
 
 import { readFileSync, writeFileSync, unlinkSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
@@ -13,6 +17,19 @@ import { KNOWLEDGE_TYPES } from '../types.js';
 import type { KnowledgeType } from '../types.js';
 import { type EntryJSON, type LinkJSON, parseEntryJSON, parseLinkJSON } from './serialize.js';
 import { SYNC_SCHEMA_VERSION } from './config.js';
+
+/**
+ * Verify that a resolved file path stays within the expected root directory.
+ * Throws if the path escapes the root (path traversal attempt).
+ */
+function assertWithinRoot(filePath: string, rootPath: string): void {
+  const resolvedRoot = resolve(rootPath);
+  const resolvedFile = resolve(filePath);
+  // Ensure the file path starts with the root path + separator (or is the root itself)
+  if (!resolvedFile.startsWith(resolvedRoot + '/') && resolvedFile !== resolvedRoot) {
+    throw new Error(`Path traversal detected: "${filePath}" escapes root "${rootPath}"`);
+  }
+}
 
 /** Ensure the sync repo directory structure exists. */
 export function ensureRepoStructure(repoPath: string): void {
@@ -37,14 +54,18 @@ export function ensureRepoStructure(repoPath: string): void {
   }
 }
 
-/** Get the file path for an entry JSON file. */
+/** Get the file path for an entry JSON file. Validates path stays within repo. */
 export function entryFilePath(repoPath: string, type: KnowledgeType, id: string): string {
-  return resolve(repoPath, 'entries', type, `${id}.json`);
+  const filePath = resolve(repoPath, 'entries', type, `${id}.json`);
+  assertWithinRoot(filePath, repoPath);
+  return filePath;
 }
 
-/** Get the file path for a link JSON file. */
+/** Get the file path for a link JSON file. Validates path stays within repo. */
 export function linkFilePath(repoPath: string, id: string): string {
-  return resolve(repoPath, 'links', `${id}.json`);
+  const filePath = resolve(repoPath, 'links', `${id}.json`);
+  assertWithinRoot(filePath, repoPath);
+  return filePath;
 }
 
 /** Write an entry JSON file. */
@@ -97,7 +118,9 @@ export function readAllEntryFiles(repoPath: string): EntryJSON[] {
     const files = readdirSync(typeDir).filter((f) => f.endsWith('.json'));
     for (const file of files) {
       try {
-        const content = readFileSync(join(typeDir, file), 'utf-8');
+        const filePath = join(typeDir, file);
+        assertWithinRoot(filePath, repoPath);
+        const content = readFileSync(filePath, 'utf-8');
         const data = JSON.parse(content);
         entries.push(parseEntryJSON(data));
       } catch (error) {
@@ -119,7 +142,9 @@ export function readAllLinkFiles(repoPath: string): LinkJSON[] {
   const files = readdirSync(linksDir).filter((f) => f.endsWith('.json'));
   for (const file of files) {
     try {
-      const content = readFileSync(join(linksDir, file), 'utf-8');
+      const filePath = join(linksDir, file);
+      assertWithinRoot(filePath, repoPath);
+      const content = readFileSync(filePath, 'utf-8');
       const data = JSON.parse(content);
       links.push(parseLinkJSON(data));
     } catch (error) {

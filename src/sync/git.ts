@@ -3,16 +3,21 @@
  *
  * Wrappers around git CLI commands. All operations are synchronous and blocking.
  * Failures are logged to stderr but generally non-fatal (except where noted).
+ *
+ * SECURITY: All commands use execFileSync (not execSync) to avoid shell
+ * interpretation of arguments. This prevents command injection via entry
+ * titles, remote URLs, or any other interpolated values.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 /** Check if a directory is a git repository. */
 export function isGitRepo(path: string): boolean {
   try {
     if (!existsSync(path)) return false;
-    execSync('git rev-parse --is-inside-work-tree', { cwd: path, stdio: 'ignore' });
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: path, stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -25,7 +30,7 @@ export function gitInit(path: string): boolean {
     if (!existsSync(path)) {
       mkdirSync(path, { recursive: true });
     }
-    execSync('git init', { cwd: path, stdio: 'ignore' });
+    execFileSync('git', ['init'], { cwd: path, stdio: 'ignore' });
     return true;
   } catch (error) {
     console.error(`Git init failed for ${path}:`, error);
@@ -36,12 +41,11 @@ export function gitInit(path: string): boolean {
 /** Clone a repository. */
 export function gitClone(remote: string, path: string): boolean {
   try {
-    // Parent directory must exist
-    const parent = path.substring(0, path.lastIndexOf('/'));
+    const parent = dirname(path);
     if (!existsSync(parent)) {
       mkdirSync(parent, { recursive: true });
     }
-    execSync(`git clone "${remote}" "${path}"`, { stdio: 'pipe' });
+    execFileSync('git', ['clone', remote, path], { stdio: 'pipe' });
     return true;
   } catch (error) {
     console.error(`Git clone failed for ${remote} -> ${path}:`, error);
@@ -52,7 +56,7 @@ export function gitClone(remote: string, path: string): boolean {
 /** Check if a remote exists. */
 export function hasRemote(path: string, remote = 'origin'): boolean {
   try {
-    execSync(`git remote get-url ${remote}`, { cwd: path, stdio: 'ignore' });
+    execFileSync('git', ['remote', 'get-url', remote], { cwd: path, stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -62,7 +66,7 @@ export function hasRemote(path: string, remote = 'origin'): boolean {
 /** Add a remote. */
 export function gitAddRemote(path: string, url: string, remote = 'origin'): boolean {
   try {
-    execSync(`git remote add ${remote} "${url}"`, { cwd: path, stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', remote, url], { cwd: path, stdio: 'ignore' });
     return true;
   } catch (error) {
     console.error(`Git remote add failed for ${path}:`, error);
@@ -77,18 +81,18 @@ export function gitAddRemote(path: string, url: string, remote = 'origin'): bool
 export function gitCommitAll(path: string, message: string): boolean {
   try {
     // Stage all changes (including deletions)
-    execSync('git add -A', { cwd: path, stdio: 'ignore' });
+    execFileSync('git', ['add', '-A'], { cwd: path, stdio: 'ignore' });
 
     // Check if there are staged changes
     try {
-      execSync('git diff --cached --quiet', { cwd: path, stdio: 'ignore' });
+      execFileSync('git', ['diff', '--cached', '--quiet'], { cwd: path, stdio: 'ignore' });
       return false; // No changes to commit
     } catch {
       // Exit code 1 means differences exist -> proceed to commit
     }
 
-    // Commit
-    execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: path, stdio: 'ignore' });
+    // Commit — message is passed as a single argument, no shell escaping needed
+    execFileSync('git', ['commit', '-m', message], { cwd: path, stdio: 'ignore' });
     return true;
   } catch (error) {
     console.error(`Git commit failed for ${path}:`, error);
@@ -101,18 +105,14 @@ export function gitPull(path: string, remote = 'origin'): boolean {
   if (!hasRemote(path, remote)) return false;
 
   try {
-    // Check if branch exists on remote
+    // Fetch first to ensure we know about remote branches
     try {
-        // Fetch first to ensure we know about remote branches
-        execSync(`git fetch ${remote}`, { cwd: path, stdio: 'ignore' });
+      execFileSync('git', ['fetch', remote], { cwd: path, stdio: 'ignore' });
     } catch {
-        // Fetch might fail if repo is empty or no network, but pull handles that
+      // Fetch might fail if repo is empty or no network, but pull handles that
     }
-    
-    // Try to pull. Use --rebase to keep history clean? No, let's stick to standard merge for now.
-    // If it's a fresh repo, we might be on 'main' or 'master'.
-    // We'll rely on git's default behavior for the current branch.
-    execSync(`git pull ${remote}`, { cwd: path, stdio: 'pipe' });
+
+    execFileSync('git', ['pull', remote], { cwd: path, stdio: 'pipe' });
     return true;
   } catch (error) {
     console.error(`Git pull failed for ${path}:`, error);
@@ -127,13 +127,15 @@ export function gitPush(path: string, remote = 'origin'): boolean {
   try {
     // Try simple push first
     try {
-      execSync(`git push ${remote}`, { cwd: path, stdio: 'pipe' });
+      execFileSync('git', ['push', remote], { cwd: path, stdio: 'pipe' });
     } catch {
       // If fails (e.g., first push), try setting upstream
-      // We need to know the current branch name
-      const currentBranch = execSync('git branch --show-current', { cwd: path, encoding: 'utf-8' }).trim();
+      const currentBranch = execFileSync('git', ['branch', '--show-current'], {
+        cwd: path,
+        encoding: 'utf-8',
+      }).trim();
       if (currentBranch) {
-        execSync(`git push -u ${remote} ${currentBranch}`, { cwd: path, stdio: 'pipe' });
+        execFileSync('git', ['push', '-u', remote, currentBranch], { cwd: path, stdio: 'pipe' });
       } else {
         throw new Error('Could not determine current branch');
       }

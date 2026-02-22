@@ -105,8 +105,9 @@ describe('sync layer', () => {
     });
 
     it('should parse valid entry JSON', () => {
+      const testId = '00000000-0000-4000-a000-000000000001';
       const raw: EntryJSON = {
-        id: 'test-id',
+        id: testId,
         type: 'fact',
         title: 'Title',
         content: 'Content',
@@ -120,7 +121,7 @@ describe('sync layer', () => {
       };
 
       const entry = parseEntryJSON(raw);
-      expect(entry.id).toBe('test-id');
+      expect(entry.id).toBe(testId);
       expect(entry.title).toBe('Title');
     });
 
@@ -154,8 +155,9 @@ describe('sync layer', () => {
 
     it('should write and read entry files', () => {
       ensureRepoStructure(repoPath);
+      const testId = '00000000-0000-4000-a000-000000000002';
       const entry: EntryJSON = {
-        id: 'test-id',
+        id: testId,
         type: 'fact',
         title: 'Title',
         content: 'Content',
@@ -169,7 +171,7 @@ describe('sync layer', () => {
       };
 
       writeEntryFile(repoPath, entry);
-      expect(existsSync(join(repoPath, 'entries', 'fact', 'test-id.json'))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'fact', `${testId}.json`))).toBe(true);
     });
   });
 
@@ -181,7 +183,7 @@ describe('sync layer', () => {
     it('should commit changes', () => {
       ensureRepoStructure(repoPath);
       const entry: EntryJSON = {
-        id: 'test-id',
+        id: '00000000-0000-4000-a000-000000000003',
         type: 'fact',
         title: 'Title',
         content: 'Content',
@@ -279,8 +281,9 @@ describe('sync layer', () => {
 
   describe('pull', () => {
     it('should import new entries from repo', async () => {
+      const remoteId = '00000000-0000-4000-a000-000000000010';
       const entry: EntryJSON = {
-        id: 'remote-1',
+        id: remoteId,
         type: 'fact',
         title: 'Remote Title',
         content: 'Remote Content',
@@ -298,7 +301,7 @@ describe('sync layer', () => {
       const result = await pull(config);
       expect(result.new_entries).toBe(1);
 
-      const local = getKnowledgeById('remote-1');
+      const local = getKnowledgeById(remoteId);
       expect(local).toBeTruthy();
       expect(local?.title).toBe('Remote Title');
     });
@@ -319,6 +322,9 @@ describe('sync layer', () => {
     });
 
     it('should aggregate entries from multiple repos', async () => {
+      const id1 = '00000000-0000-4000-a000-000000000011';
+      const id2 = '00000000-0000-4000-a000-000000000012';
+
       // Setup multi-repo config
       const multiConfig: SyncConfig = {
         repos: [
@@ -330,19 +336,19 @@ describe('sync layer', () => {
       // Entry 1 in repo 1
       ensureRepoStructure(repoPath);
       writeEntryFile(repoPath, {
-        id: 'e1', type: 'fact', title: 'E1', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        id: id1, type: 'fact', title: 'E1', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
       });
 
       // Entry 2 in repo 2
       ensureRepoStructure(repoPath2);
       writeEntryFile(repoPath2, {
-        id: 'e2', type: 'fact', title: 'E2', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        id: id2, type: 'fact', title: 'E2', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
       });
 
       const result = await pull(multiConfig);
       expect(result.new_entries).toBe(2);
-      expect(getKnowledgeById('e1')).toBeTruthy();
-      expect(getKnowledgeById('e2')).toBeTruthy();
+      expect(getKnowledgeById(id1)).toBeTruthy();
+      expect(getKnowledgeById(id2)).toBeTruthy();
     });
   });
 
