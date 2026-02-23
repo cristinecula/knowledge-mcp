@@ -18,6 +18,18 @@ Built for teams where multiple agents work across many repositories. Store conve
 
 ## Installation
 
+### Prerequisites
+
+- **Node.js** 18 or later
+- **npm** (included with Node.js)
+- A C++ compiler toolchain for `better-sqlite3` native compilation:
+  - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
+  - **Linux (Debian/Ubuntu):** `sudo apt install build-essential python3`
+  - **Linux (Fedora):** `sudo dnf install gcc-c++ make python3`
+  - **Windows:** [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload
+
+### From source
+
 ```bash
 git clone https://github.com/cristinecula/knowledge-mcp.git
 cd knowledge-mcp
@@ -25,7 +37,74 @@ npm install
 npm run build
 ```
 
-The database is automatically created at `~/.knowledge-mcp/knowledge.db` on first run.
+Verify the installation:
+
+```bash
+node build/index.js --help
+```
+
+### As a CLI tool
+
+To make the `knowledge-mcp` command available globally:
+
+```bash
+npm link
+knowledge-mcp --help
+```
+
+### Quick start
+
+1. Add to your MCP client config (see [Configuration](#configuration) for full details):
+
+```json
+{
+  "knowledge": {
+    "type": "local",
+    "command": ["node", "/path/to/knowledge-mcp/build/index.js"],
+    "enabled": true
+  }
+}
+```
+
+2. The SQLite database is automatically created at `~/.knowledge-mcp/knowledge.db` on first run.
+3. Open `http://localhost:3333` to see the knowledge graph visualization.
+
+### Agent instructions
+
+The MCP server provides tools, but AI agents won't use them proactively unless
+instructed to. Add an agent instructions file to tell agents to query, store,
+and maintain knowledge during their sessions.
+
+A template is provided at [`examples/AGENTS.md`](examples/AGENTS.md). Copy it
+to your MCP client's instructions location:
+
+**Claude Code:**
+
+```bash
+# Global (all projects)
+cp examples/AGENTS.md ~/.claude/CLAUDE.md
+
+# Or per-project
+cp examples/AGENTS.md /path/to/project/CLAUDE.md
+```
+
+**OpenCode:**
+
+```bash
+# Global (all projects)
+cp examples/AGENTS.md ~/.config/opencode/AGENTS.md
+
+# Or per-project
+cp examples/AGENTS.md /path/to/project/AGENTS.md
+```
+
+For other MCP clients, add the contents to wherever your client reads system
+instructions from.
+
+Without these instructions, agents have access to the knowledge tools but won't
+think to use them. The instructions file closes the loop — agents discover
+existing knowledge at session start, store useful findings during work, and
+reinforce or deprecate entries as they go.
 
 ## Configuration
 
