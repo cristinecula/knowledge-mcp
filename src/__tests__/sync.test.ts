@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setupTestDb, teardownTestDb } from './helpers.js';
+import { getDb } from '../db/connection.js';
 import {
   insertKnowledge,
   insertLink,
@@ -25,6 +26,7 @@ import {
   linkToJSON,
   ensureRepoStructure,
   writeEntryFile,
+  readEntryFileRaw,
   writeLinkFile,
   push,
   pull,
@@ -988,6 +990,133 @@ describe('sync layer', () => {
       expect(imported).not.toBeNull();
       expect(imported!.status).toBe('deprecated');
       expect(imported!.deprecation_reason).toBe('Replaced by automated linting');
+    });
+  });
+
+  describe('timestamp preservation on pull', () => {
+    it('should preserve remote updated_at as content_updated_at on remote_wins', async () => {
+      // 1. Create local entry and mark as synced in the past
+      const entry = insertKnowledge({
+        type: 'fact',
+        title: 'Old title',
+        content: 'Old content',
+      });
+      const pastTime = '2025-01-01T00:00:00.000Z';
+      updateSyncedAt(entry.id, pastTime);
+      // Also set content_updated_at to pastTime so the local entry
+      // appears unchanged since its last sync (otherwise detectConflict
+      // sees localChanged=true because content_updated_at=now() > synced_at).
+      getDb().prepare('UPDATE knowledge SET content_updated_at = ? WHERE id = ?').run(pastTime, entry.id);
+
+      // 2. Create remote version with updated content and a specific updated_at
+      const remoteUpdatedAt = '2025-06-15T12:00:00.000Z';
+      ensureRepoStructure(repoPath);
+      writeEntryFile(repoPath, {
+        id: entry.id,
+        type: 'fact',
+        title: 'New title',
+        content: 'New content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'remote',
+        status: 'active',
+        created_at: entry.created_at,
+        updated_at: remoteUpdatedAt,
+      });
+      gitCommitAll(repoPath, 'update entry remotely');
+
+      // 3. Pull — remote should win (local hasn't changed since sync)
+      const result = await pull(config);
+      expect(result.updated).toBe(1);
+
+      // 4. Verify content_updated_at matches the remote's updated_at (not now())
+      const updated = getKnowledgeById(entry.id);
+      expect(updated).not.toBeNull();
+      expect(updated!.content_updated_at).toBe(remoteUpdatedAt);
+      expect(updated!.title).toBe('New title');
+    });
+
+    it('should produce byte-identical JSON after pull→push roundtrip', async () => {
+      // 1. Write a remote entry with a known updated_at
+      const remoteId = '00000000-0000-4000-a000-000000000098';
+      const remoteUpdatedAt = '2025-06-15T12:00:00.000Z';
+      const remoteJSON: EntryJSON = {
+        id: remoteId,
+        type: 'fact',
+        title: 'Roundtrip test',
+        content: 'Test content',
+        tags: ['tag1'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: '2025-01-01T00:00:00.000Z',
+        updated_at: remoteUpdatedAt,
+      };
+      ensureRepoStructure(repoPath);
+      writeEntryFile(repoPath, remoteJSON);
+      gitCommitAll(repoPath, 'add entry');
+
+      // 2. Pull — imports the entry
+      const pullResult = await pull(config);
+      expect(pullResult.new_entries).toBe(1);
+
+      // 3. Push — should write byte-identical JSON
+      push(config);
+
+      // 4. Read the file back and compare
+      const fileContent = readEntryFileRaw(repoPath, 'fact', remoteId);
+      const expected = JSON.stringify(remoteJSON, null, 2) + '\n';
+      expect(fileContent).toBe(expected);
+    });
+  });
+
+  describe('push skip for unchanged entries', () => {
+    it('should not write file when entry JSON is byte-identical', () => {
+      insertKnowledge({
+        type: 'fact',
+        title: 'Stable entry',
+        content: 'Content that does not change',
+      });
+
+      // First push — creates the file
+      const result1 = push(config);
+      expect(result1.new_entries).toBe(1);
+
+      // Commit the initial push
+      gitCommitAll(repoPath, 'initial push');
+
+      // Second push — file should be skipped (no write, no git change)
+      push(config);
+
+      // gitCommitAll returns false when there's nothing to commit
+      const committed = gitCommitAll(repoPath, 'second push');
+      expect(committed).toBe(false);
+    });
+
+    it('should write file when entry content changes between pushes', () => {
+      const entry = insertKnowledge({
+        type: 'fact',
+        title: 'Changing entry',
+        content: 'Original content',
+      });
+
+      // First push
+      push(config);
+      gitCommitAll(repoPath, 'initial push');
+
+      // Modify the entry
+      updateKnowledgeFields(entry.id, { content: 'Updated content' });
+
+      // Second push — push() commits internally, so we verify via file content
+      push(config);
+
+      // Verify file has new content
+      const fileContent = readEntryFileRaw(repoPath, 'fact', entry.id);
+      expect(fileContent).not.toBeNull();
+      const parsed = JSON.parse(fileContent!);
+      expect(parsed.content).toBe('Updated content');
     });
   });
 });

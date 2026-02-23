@@ -15,6 +15,7 @@ import { entryToJSON, linkToJSON } from './serialize.js';
 import {
   ensureRepoStructure,
   writeEntryFile,
+  readEntryFileRaw,
   writeLinkFile,
   deleteEntryFile,
   deleteLinkFile,
@@ -82,11 +83,22 @@ export function push(config: import('./routing.js').SyncConfig): PushResult {
     const repoPath = targetRepo.path;
     entryRepoMap.set(entry.id, repoPath);
 
-    // Write file
+    // Serialize and compare against existing file to skip unnecessary writes.
+    // This prevents spurious git commits when the entry hasn't actually changed
+    // (e.g., after a pull→push cycle where only local metadata like access_count changed).
     const json = entryToJSON(entry);
-    writeEntryFile(repoPath, json);
-    updateSyncedAt(entry.id);
-    touchedRepos.add(repoPath);
+    const serialized = JSON.stringify(json, null, 2) + '\n';
+    const existing = readEntryFileRaw(repoPath, entry.type, entry.id);
+
+    if (existing === serialized) {
+      // File is byte-identical — skip write
+      updateSyncedAt(entry.id);
+    } else {
+      // File changed or is new — write it
+      writeEntryFile(repoPath, json);
+      updateSyncedAt(entry.id);
+      touchedRepos.add(repoPath);
+    }
     
     // Check if new or updated
     const existingInTarget = initialRepoState.get(repoPath)?.has(entry.id);

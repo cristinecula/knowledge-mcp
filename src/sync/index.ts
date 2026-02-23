@@ -19,6 +19,7 @@ export { syncWriteEntry, syncWriteLink, syncDeleteEntry, syncDeleteLink, touched
 export {
   ensureRepoStructure,
   writeEntryFile,
+  readEntryFileRaw,
   writeLinkFile,
   deleteEntryFile,
   deleteLinkFile,

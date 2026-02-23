@@ -74,6 +74,13 @@ export function writeEntryFile(repoPath: string, entry: EntryJSON): void {
   writeFileSync(filePath, JSON.stringify(entry, null, 2) + '\n');
 }
 
+/** Read an entry JSON file and return its raw string content (for comparison). Returns null if the file doesn't exist. */
+export function readEntryFileRaw(repoPath: string, type: KnowledgeType, id: string): string | null {
+  const filePath = entryFilePath(repoPath, type, id);
+  if (!existsSync(filePath)) return null;
+  return readFileSync(filePath, 'utf-8');
+}
+
 /** Write a link JSON file. */
 export function writeLinkFile(repoPath: string, link: LinkJSON): void {
   const filePath = linkFilePath(repoPath, link.id);

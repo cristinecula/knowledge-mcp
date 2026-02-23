@@ -147,6 +147,9 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
 
       case 'remote_wins':
         // Apply remote changes to local (keep local memory fields)
+        // Pass remote.updated_at as content_updated_at override to prevent
+        // timestamp drift: the JSON updated_at roundtrips cleanly through
+        // push → pull cycles without generating spurious commits.
         updateKnowledgeContent(local.id, {
           type: remote.type as KnowledgeType,
           title: remote.title,
@@ -158,7 +161,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           status: remote.status as Status,
           updated_at: remote.updated_at,
           deprecation_reason: remote.deprecation_reason ?? null,
-        });
+        }, remote.updated_at);
         result.updated++;
 
         // Re-generate embedding

@@ -709,12 +709,14 @@ export function updateKnowledgeContent(
     updated_at?: string;
     deprecation_reason?: string | null;
   },
+  /** When set, use this value for content_updated_at instead of now(). Used by pull to preserve remote timestamps and prevent drift. */
+  contentUpdatedAtOverride?: string,
 ): KnowledgeEntry | null {
   const db = getDb();
   const now = new Date().toISOString();
 
   const sets: string[] = ['content_updated_at = ?', 'synced_at = ?'];
-  const values: unknown[] = [now, now];
+  const values: unknown[] = [contentUpdatedAtOverride ?? now, now];
 
   if (fields.type !== undefined) {
     sets.push('type = ?');
