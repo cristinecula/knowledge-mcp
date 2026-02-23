@@ -19,6 +19,7 @@ import {
   importLink,
   updateKnowledgeContent,
   updateSyncedAt,
+  alignContentTimestamp,
   updateStatus,
   deleteKnowledge,
   deleteLink,
@@ -142,8 +143,15 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
 
     switch (mergeResult.action) {
       case 'no_change':
-        // Update synced_at to track that we've seen this version
-        updateSyncedAt(local.id);
+        // If the remote's updated_at differs from our content_updated_at,
+        // align ours to match. This prevents push from serializing a
+        // different updated_at and creating a spurious commit. Common when
+        // an older version sets content_updated_at = now() on every pull.
+        if (remote.updated_at !== local.content_updated_at) {
+          alignContentTimestamp(local.id, remote.updated_at);
+        } else {
+          updateSyncedAt(local.id);
+        }
         break;
 
       case 'remote_wins':

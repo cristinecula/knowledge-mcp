@@ -619,6 +619,21 @@ export function updateSyncedAt(id: string, timestamp?: string): void {
   db.prepare('UPDATE knowledge SET synced_at = ? WHERE id = ?').run(ts, id);
 }
 
+/**
+ * Align content_updated_at with the remote's updated_at and set synced_at.
+ * Used during pull when content is identical but timestamps differ (e.g., the
+ * remote was pushed by an older version that set content_updated_at = now()).
+ * Aligning the timestamp prevents push from re-serializing a different
+ * updated_at and creating a spurious commit.
+ */
+export function alignContentTimestamp(id: string, remoteUpdatedAt: string): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.prepare(
+    'UPDATE knowledge SET content_updated_at = ?, synced_at = ? WHERE id = ?',
+  ).run(remoteUpdatedAt, now, id);
+}
+
 /** Insert a knowledge entry with a specific ID (used during sync import) */
 export interface ImportKnowledgeParams {
   id: string;
