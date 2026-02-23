@@ -23,7 +23,8 @@ export function initSchema(db: Database.Database): void {
       strength REAL NOT NULL DEFAULT 1.0,
       status TEXT NOT NULL DEFAULT 'active',
       synced_at TEXT,
-      deprecation_reason TEXT
+      deprecation_reason TEXT,
+      declaration TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_type ON knowledge(type);
@@ -128,6 +129,11 @@ function migrateSchema(db: Database.Database): void {
   // Migration 3: Add deprecation_reason column
   if (!columnNames.has('deprecation_reason')) {
     db.exec(`ALTER TABLE knowledge ADD COLUMN deprecation_reason TEXT`);
+  }
+
+  // Migration 4: Add declaration column (for wiki entries)
+  if (!columnNames.has('declaration')) {
+    db.exec(`ALTER TABLE knowledge ADD COLUMN declaration TEXT`);
   }
 
   // Backfill: ensure content_updated_at is set for any rows where it's empty

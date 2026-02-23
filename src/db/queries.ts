@@ -23,6 +23,7 @@ export interface InsertKnowledgeParams {
   project?: string | null;
   scope?: Scope;
   source?: string;
+  declaration?: string | null;
 }
 
 export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
@@ -31,8 +32,8 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
   const id = randomUUID();
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active', NULL)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, declaration)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active', NULL, ?)
   `);
 
   stmt.run(
@@ -48,6 +49,7 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
     now,
     now,
     now,
+    params.declaration ?? null,
   );
 
   return getKnowledgeById(id)!;
@@ -71,6 +73,7 @@ export function updateKnowledgeFields(
     type: KnowledgeType;
     project: string | null;
     scope: Scope;
+    declaration: string | null;
   }>,
 ): KnowledgeEntry | null {
   const db = getDb();
@@ -102,6 +105,10 @@ export function updateKnowledgeFields(
   if (fields.scope !== undefined) {
     sets.push('scope = ?');
     values.push(fields.scope);
+  }
+  if (fields.declaration !== undefined) {
+    sets.push('declaration = ?');
+    values.push(fields.declaration);
   }
 
   values.push(id);
@@ -556,6 +563,7 @@ export interface GraphData {
     tags: string[];
     created_at: string;
     last_accessed_at: string;
+    declaration: string | null;
   }>;
   links: Array<{
     id: string;
@@ -590,6 +598,7 @@ export function getGraphData(): GraphData {
       tags: JSON.parse(e.tags),
       created_at: e.created_at,
       last_accessed_at: e.last_accessed_at,
+      declaration: e.declaration ?? null,
     })),
     links: links.map((l) => ({
       id: l.id,
@@ -622,6 +631,7 @@ export interface ImportKnowledgeParams {
   source?: string;
   status?: Status;
   deprecation_reason?: string | null;
+  declaration?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -631,8 +641,8 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, declaration)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -651,6 +661,7 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
     params.status ?? 'active',
     now,                  // synced_at = now
     params.deprecation_reason ?? null,
+    params.declaration ?? null,
   );
 
   return getKnowledgeById(params.id)!;
@@ -708,6 +719,7 @@ export function updateKnowledgeContent(
     status?: Status;
     updated_at?: string;
     deprecation_reason?: string | null;
+    declaration?: string | null;
   },
   /** When set, use this value for content_updated_at instead of now(). Used by pull to preserve remote timestamps and prevent drift. */
   contentUpdatedAtOverride?: string,
@@ -757,6 +769,10 @@ export function updateKnowledgeContent(
   if (fields.deprecation_reason !== undefined) {
     sets.push('deprecation_reason = ?');
     values.push(fields.deprecation_reason);
+  }
+  if (fields.declaration !== undefined) {
+    sets.push('declaration = ?');
+    values.push(fields.declaration);
   }
 
   values.push(id);

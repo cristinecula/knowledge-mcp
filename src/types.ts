@@ -8,6 +8,7 @@ export const KNOWLEDGE_TYPES = [
   'fact',
   'debug_note',
   'process',
+  'wiki',
 ] as const;
 
 export type KnowledgeType = (typeof KNOWLEDGE_TYPES)[number];
@@ -62,6 +63,7 @@ export interface KnowledgeEntry {
   status: Status;
   synced_at: string | null;
   deprecation_reason: string | null;
+  declaration: string | null;
 }
 
 /** Row shape as stored in SQLite (tags is a JSON string) */
@@ -83,8 +85,8 @@ export interface KnowledgeRow {
   status: string;
   synced_at: string | null;
   deprecation_reason: string | null;
+  declaration: string | null;
 }
-
 export interface KnowledgeLink {
   id: string;
   source_id: string;
