@@ -142,7 +142,8 @@ function applyFilters(data) {
   return { nodes, links };
 }
 
-// Render
+// Render — builds (or rebuilds) the full simulation and DOM elements.
+// For lightweight visual updates (highlight changes, search focus), use updateVisuals() instead.
 function render(data) {
   const filtered = applyFilters(data);
 
@@ -179,49 +180,23 @@ function render(data) {
 
   // Draw links
   const link = zoomGroup.append('g')
+    .attr('class', 'links-group')
     .selectAll('line')
     .data(filtered.links)
     .join('line')
     .attr('stroke', d => LINK_COLORS[d.link_type] || '#30363d')
     .attr('stroke-width', 1.5)
-    .attr('stroke-opacity', d => {
-      if (!searchActive) return 0.5;
-      const srcId = typeof d.source === 'object' ? d.source.id : d.source;
-      const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
-      if (searchMatchIds.has(srcId) && searchMatchIds.has(tgtId)) return 0.5;
-      return 0.08;
-    })
     .attr('stroke-dasharray', d => LINK_DASH[d.link_type] || null)
     .attr('marker-end', d => `url(#arrow-${d.link_type})`);
 
   // Draw nodes
   const node = zoomGroup.append('g')
+    .attr('class', 'nodes-group')
     .selectAll('circle')
     .data(filtered.nodes)
     .join('circle')
     .attr('r', d => radiusScale(d.strength))
     .attr('fill', d => TYPE_COLORS[d.type] || '#8b949e')
-    .attr('opacity', d => {
-      const baseOpacity = STATUS_OPACITY[d.status] ?? 0.5;
-      if (searchActive && !searchMatchIds.has(d.id)) return baseOpacity * 0.15;
-      return baseOpacity;
-    })
-    .attr('stroke', d => {
-      const focusedId = searchResults[searchIndex]?.id;
-      if (searchActive && d.id === focusedId) return '#f0c040';
-      if (searchActive && searchMatchIds.has(d.id)) return '#f0f6fc';
-      if (d.status === 'needs_revalidation') return '#d29922';
-      if (d.id === selectedNodeId) return '#f0f6fc';
-      return 'none';
-    })
-    .attr('stroke-width', d => {
-      const focusedId = searchResults[searchIndex]?.id;
-      if (searchActive && d.id === focusedId) return 3.5;
-      if (searchActive && searchMatchIds.has(d.id)) return 2;
-      if (d.status === 'needs_revalidation') return 3;
-      if (d.id === selectedNodeId) return 2;
-      return 0;
-    })
     .style('cursor', 'pointer')
     .call(drag(simulation));
 
@@ -231,16 +206,16 @@ function render(data) {
 
   // Labels
   const label = zoomGroup.append('g')
+    .attr('class', 'labels-group')
     .selectAll('text')
     .data(filtered.nodes)
     .join('text')
     .attr('class', 'node-label')
     .attr('dy', d => radiusScale(d.strength) + 14)
-    .attr('opacity', d => {
-      if (searchActive && !searchMatchIds.has(d.id)) return 0.15;
-      return 1;
-    })
     .text(d => d.title.length > 30 ? d.title.slice(0, 28) + '...' : d.title);
+
+  // Apply visual attributes (opacity, stroke, etc.) based on current state
+  updateVisuals();
 
   // Hover tooltip
   node
@@ -262,8 +237,7 @@ function render(data) {
   node.on('click', async (event, d) => {
     event.stopPropagation();
     selectedNodeId = d.id;
-    node.attr('stroke', n => n.id === selectedNodeId ? '#f0f6fc' : (n.status === 'needs_revalidation' ? '#d29922' : 'none'))
-      .attr('stroke-width', n => n.id === selectedNodeId ? 2 : (n.status === 'needs_revalidation' ? 3 : 0));
+    updateVisuals();
     await showSidebar(d.id);
   });
 
@@ -271,8 +245,7 @@ function render(data) {
   svg.on('click', () => {
     selectedNodeId = null;
     sidebar.classList.remove('open');
-    node.attr('stroke', n => n.status === 'needs_revalidation' ? '#d29922' : 'none')
-      .attr('stroke-width', n => n.status === 'needs_revalidation' ? 3 : 0);
+    updateVisuals();
   });
 
   // Tick
@@ -291,6 +264,61 @@ function render(data) {
       .attr('x', d => d.x)
       .attr('y', d => d.y);
   });
+}
+
+/**
+ * Lightweight visual update — applies opacity, stroke, and highlight attributes
+ * to existing DOM elements without recreating the simulation or repositioning nodes.
+ * Use this for selection changes, search navigation, and any state change that
+ * doesn't alter which nodes/links are displayed.
+ */
+function updateVisuals() {
+  const focusedId = searchResults[searchIndex]?.id;
+
+  // Update stats
+  const searchSuffix = searchActive ? ` (${searchMatchIds.size} match${searchMatchIds.size !== 1 ? 'es' : ''})` : '';
+  const nodeCount = zoomGroup.select('.nodes-group').selectAll('circle').size();
+  const linkCount = zoomGroup.select('.links-group').selectAll('line').size();
+  statsEl.textContent = `${nodeCount} entries, ${linkCount} links${searchSuffix}`;
+
+  // Links
+  zoomGroup.select('.links-group').selectAll('line')
+    .attr('stroke-opacity', d => {
+      if (!searchActive) return 0.5;
+      const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+      if (searchMatchIds.has(srcId) && searchMatchIds.has(tgtId)) return 0.5;
+      return 0.08;
+    });
+
+  // Nodes
+  zoomGroup.select('.nodes-group').selectAll('circle')
+    .attr('opacity', d => {
+      const baseOpacity = STATUS_OPACITY[d.status] ?? 0.5;
+      if (searchActive && !searchMatchIds.has(d.id)) return baseOpacity * 0.15;
+      return baseOpacity;
+    })
+    .attr('stroke', d => {
+      if (searchActive && d.id === focusedId) return '#f0c040';
+      if (searchActive && searchMatchIds.has(d.id)) return '#f0f6fc';
+      if (d.status === 'needs_revalidation') return '#d29922';
+      if (d.id === selectedNodeId) return '#f0f6fc';
+      return 'none';
+    })
+    .attr('stroke-width', d => {
+      if (searchActive && d.id === focusedId) return 3.5;
+      if (searchActive && searchMatchIds.has(d.id)) return 2;
+      if (d.status === 'needs_revalidation') return 3;
+      if (d.id === selectedNodeId) return 2;
+      return 0;
+    });
+
+  // Labels
+  zoomGroup.select('.labels-group').selectAll('text')
+    .attr('opacity', d => {
+      if (searchActive && !searchMatchIds.has(d.id)) return 0.15;
+      return 1;
+    });
 }
 
 // Drag behavior
@@ -388,10 +416,7 @@ async function showSidebar(id) {
 window.navigateToNode = async function(id) {
   selectedNodeId = id;
   await showSidebar(id);
-  // Highlight the node in the graph
-  d3.selectAll('circle')
-    .attr('stroke', d => d.id === id ? '#f0f6fc' : (d.status === 'needs_revalidation' ? '#d29922' : 'none'))
-    .attr('stroke-width', d => d.id === id ? 2 : (d.status === 'needs_revalidation' ? 3 : 0));
+  updateVisuals();
 };
 
 function escapeHtml(text) {
@@ -404,9 +429,7 @@ function escapeHtml(text) {
 document.getElementById('sidebar-close').addEventListener('click', () => {
   sidebar.classList.remove('open');
   selectedNodeId = null;
-  d3.selectAll('circle')
-    .attr('stroke', d => d.status === 'needs_revalidation' ? '#d29922' : 'none')
-    .attr('stroke-width', d => d.status === 'needs_revalidation' ? 3 : 0);
+  updateVisuals();
 });
 
 // Populate the project filter dropdown from the current graph data
@@ -483,8 +506,8 @@ function navigateSearchResult(delta) {
   const focusedId = searchResults[searchIndex].id;
   selectedNodeId = focusedId;
   showSidebar(focusedId);
-  // Re-render to update focused node highlight, then zoom
-  render(graphData);
+  // Update highlights without rebuilding the simulation
+  updateVisuals();
   zoomToNode(focusedId);
 }
 
