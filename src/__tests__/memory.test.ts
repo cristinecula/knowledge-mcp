@@ -10,6 +10,7 @@ import {
   updateStatus,
   recordAccess,
 } from '../db/queries.js';
+import { getDb } from '../db/connection.js';
 import {
   HALF_LIFE_MS,
   DEPRECATED_DECAY_MULTIPLIER,
@@ -227,5 +228,21 @@ describe('runMaintenanceSweep', () => {
     const result = runMaintenanceSweep();
     expect(result.processed).toBe(2); // A and B (C is deprecated)
     expect(typeof result.transitioned).toBe('number');
+  });
+
+  it('should not process wiki entries (exempt from decay)', () => {
+    const wiki = insertKnowledge({ type: 'wiki', title: 'Wiki Page', content: 'Wiki content' });
+
+    // Simulate an old last_accessed_at (4 half-lives ago → normally strength ~0.0625)
+    const oldDate = new Date(Date.now() - 4 * HALF_LIFE_MS).toISOString();
+    getDb().prepare('UPDATE knowledge SET last_accessed_at = ?').run(oldDate);
+
+    const result = runMaintenanceSweep();
+    expect(result.processed).toBe(0); // wiki entries are skipped entirely
+
+    const updated = getKnowledgeById(wiki.id)!;
+    expect(updated.status).toBe('active');
+    // Strength should be unchanged (still 1.0 from initial insert)
+    expect(updated.strength).toBeCloseTo(1.0, 1);
   });
 });

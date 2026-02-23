@@ -21,7 +21,9 @@ export function runMaintenanceSweep(): {
   processed: number;
   transitioned: number;
 } {
-  const entries = getAllActiveEntries();
+  // Wiki entries are exempt from decay — they represent curated documentation
+  // that should persist indefinitely without strength degradation.
+  const entries = getAllActiveEntries().filter((e) => e.type !== 'wiki');
   const allLinks = getAllLinks();
 
   // Build a link index: entryId → links involving that entry
