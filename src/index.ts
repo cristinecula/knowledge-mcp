@@ -12,6 +12,7 @@ import {
 } from './embeddings/provider.js';
 import { backfillEmbeddings } from './embeddings/similarity.js';
 import { getAllEntries } from './db/queries.js';
+import { INSTRUCTIONS } from './instructions.js';
 import { registerStoreTool } from './tools/store.js';
 import { registerQueryTool } from './tools/query.js';
 import { registerListTool } from './tools/list.js';
@@ -224,10 +225,10 @@ async function main(): Promise<void> {
   }
 
   // Create MCP server
-  const server = new McpServer({
-    name: 'knowledge-mcp',
-    version: '1.0.0',
-  });
+  const server = new McpServer(
+    { name: 'knowledge-mcp', version: '1.0.0' },
+    { instructions: INSTRUCTIONS },
+  );
 
   // Register all tools
   registerStoreTool(server);

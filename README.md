@@ -71,40 +71,13 @@ knowledge-mcp --help
 
 ### Agent instructions
 
-The MCP server provides tools, but AI agents won't use them proactively unless
-instructed to. Add an agent instructions file to tell agents to query, store,
-and maintain knowledge during their sessions.
+The server ships with built-in agent instructions that are sent to MCP clients
+during the initialization handshake. Compatible clients (Claude Code, OpenCode,
+etc.) automatically inject these into the agent's system prompt, telling it to
+query, store, and maintain knowledge during sessions. No manual setup is needed.
 
-A template is provided at [`examples/AGENTS.md`](examples/AGENTS.md). Copy it
-to your MCP client's instructions location:
-
-**Claude Code:**
-
-```bash
-# Global (all projects)
-cp examples/AGENTS.md ~/.claude/CLAUDE.md
-
-# Or per-project
-cp examples/AGENTS.md /path/to/project/CLAUDE.md
-```
-
-**OpenCode:**
-
-```bash
-# Global (all projects)
-cp examples/AGENTS.md ~/.config/opencode/AGENTS.md
-
-# Or per-project
-cp examples/AGENTS.md /path/to/project/AGENTS.md
-```
-
-For other MCP clients, add the contents to wherever your client reads system
-instructions from.
-
-Without these instructions, agents have access to the knowledge tools but won't
-think to use them. The instructions file closes the loop — agents discover
-existing knowledge at session start, store useful findings during work, and
-reinforce or deprecate entries as they go.
+If you want to add project-specific guidance on top, you can still create an
+`AGENTS.md` (OpenCode) or `CLAUDE.md` (Claude Code) in your project root.
 
 ## Configuration
 
