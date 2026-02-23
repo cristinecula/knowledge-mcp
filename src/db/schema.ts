@@ -142,6 +142,16 @@ function migrateSchema(db: Database.Database): void {
     db.exec(`ALTER TABLE knowledge ADD COLUMN parent_page_id TEXT`);
   }
 
+  // Migration 6: Add synced_at column to knowledge_links
+  const linkColumns = db.prepare('PRAGMA table_info(knowledge_links)').all() as Array<{
+    name: string;
+  }>;
+  const linkColumnNames = new Set(linkColumns.map((c) => c.name));
+
+  if (!linkColumnNames.has('synced_at')) {
+    db.exec(`ALTER TABLE knowledge_links ADD COLUMN synced_at TEXT`);
+  }
+
   // Backfill: ensure content_updated_at is set for any rows where it's empty
   db.exec(`UPDATE knowledge SET content_updated_at = updated_at WHERE content_updated_at = ''`);
 }

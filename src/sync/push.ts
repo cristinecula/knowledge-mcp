@@ -10,6 +10,7 @@ import {
   getAllEntries,
   getAllLinks,
   updateSyncedAt,
+  updateLinkSyncedAt,
 } from '../db/queries.js';
 import { entryToJSON, linkToJSON } from './serialize.js';
 import {
@@ -152,16 +153,6 @@ export function push(config: import('./routing.js').SyncConfig): PushResult {
   const localLinkIds = new Set<string>();
   const linkRepoMap = new Map<string, string>();
 
-  // Pre-load existing link IDs from all repos for new vs existing tracking
-  const initialLinkState = new Set<string>();
-  for (const repo of config.repos) {
-    if (existsSync(repo.path)) {
-      for (const id of getRepoLinkIds(repo.path)) {
-        initialLinkState.add(id);
-      }
-    }
-  }
-
   for (const link of localLinks) {
     // Skip conflict-related links
     if (link.source === 'sync:conflict') continue;
@@ -177,9 +168,13 @@ export function push(config: import('./routing.js').SyncConfig): PushResult {
       linkRepoMap.set(link.id, sourceRepo);
       touchedRepos.add(sourceRepo);
 
-      if (!initialLinkState.has(link.id)) {
+      // Count as new if never synced before
+      if (!link.synced_at) {
         result.new_links++;
       }
+
+      // Mark link as synced
+      updateLinkSyncedAt(link.id);
     }
   }
 

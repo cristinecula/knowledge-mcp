@@ -97,6 +97,7 @@ export interface KnowledgeLink {
   description: string | null;
   created_at: string;
   source: string;
+  synced_at: string | null;
 }
 
 export interface KnowledgeLinkRow {
@@ -107,6 +108,7 @@ export interface KnowledgeLinkRow {
   description: string | null;
   created_at: string;
   source: string;
+  synced_at: string | null;
 }
 
 // === Constants ===

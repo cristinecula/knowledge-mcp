@@ -628,6 +628,13 @@ export function updateSyncedAt(id: string, timestamp?: string): void {
   db.prepare('UPDATE knowledge SET synced_at = ? WHERE id = ?').run(ts, id);
 }
 
+/** Update synced_at timestamp for a link */
+export function updateLinkSyncedAt(id: string, timestamp?: string): void {
+  const db = getDb();
+  const ts = timestamp ?? new Date().toISOString();
+  db.prepare('UPDATE knowledge_links SET synced_at = ? WHERE id = ?').run(ts, id);
+}
+
 /**
  * Align content_updated_at with the remote's updated_at and set synced_at.
  * Used during pull when content is identical but timestamps differ (e.g., the
@@ -706,11 +713,12 @@ export interface ImportLinkParams {
 
 export function importLink(params: ImportLinkParams): KnowledgeLink | null {
   const db = getDb();
+  const now = new Date().toISOString();
 
   try {
     db.prepare(
-      `INSERT INTO knowledge_links (id, source_id, target_id, link_type, description, created_at, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO knowledge_links (id, source_id, target_id, link_type, description, created_at, source, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       params.id,
       params.sourceId,
@@ -719,6 +727,7 @@ export function importLink(params: ImportLinkParams): KnowledgeLink | null {
       params.description ?? null,
       params.created_at,
       params.source ?? 'unknown',
+      now,
     );
     return getLinkById(params.id);
   } catch (error) {

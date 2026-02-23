@@ -820,6 +820,7 @@ describe('sync layer', () => {
       expect(imported).toBeTruthy();
       expect(imported!.link_type).toBe('related');
       expect(imported!.source).toBe('remote-agent');
+      expect(imported!.synced_at).toBeTruthy();
     });
 
     it('should skip links where source/target missing locally', async () => {
@@ -842,11 +843,9 @@ describe('sync layer', () => {
     });
 
     it('should detect remote link deletions', async () => {
-      // Create synced entries and link
+      // Create entries and link, then push to establish sync baseline
       const e1 = insertKnowledge({ title: 'E1', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'E2', type: 'fact', content: '' });
-      syncWriteEntry(e1);
-      syncWriteEntry(e2);
 
       const link = insertLink({
         sourceId: e1.id,
@@ -855,15 +854,14 @@ describe('sync layer', () => {
         source: 'user',
       });
 
-      // Also write the link to the repo (simulates it was previously synced)
-      syncWriteLink(link, e1);
+      // Push to sync everything — this sets synced_at on links
+      push(config);
 
-      // Pull to establish sync baseline (entries + link all present in repo)
-      await pull(config);
-
-      // Verify link exists locally
+      // Verify link exists locally and has synced_at set
       let links = getAllLinks();
-      expect(links.find((l) => l.id === link.id)).toBeTruthy();
+      const syncedLink = links.find((l) => l.id === link.id);
+      expect(syncedLink).toBeTruthy();
+      expect(syncedLink!.synced_at).toBeTruthy();
 
       // Remove link file from repo (simulate remote deletion)
       const linkPath = join(repoPath, 'links', `${link.id}.json`);
@@ -872,12 +870,40 @@ describe('sync layer', () => {
         unlinkSync(linkPath);
       }
 
-      // Pull again — should detect deletion
+      // Pull again — should detect deletion because link has synced_at
       const result = await pull(config);
       expect(result.deleted_links).toBe(1);
 
       links = getAllLinks();
       expect(links.find((l) => l.id === link.id)).toBeUndefined();
+    });
+    it('should preserve locally-created links that have not been pushed', async () => {
+      // Create entries and push them to establish sync baseline
+      const e1 = insertKnowledge({ title: 'E1', type: 'fact', content: '' });
+      const e2 = insertKnowledge({ title: 'E2', type: 'fact', content: '' });
+      push(config);
+
+      // Now create a link locally (NOT pushed — synced_at should be null)
+      const link = insertLink({
+        sourceId: e1.id,
+        targetId: e2.id,
+        linkType: 'related',
+        description: 'local-only link',
+        source: 'user',
+      });
+
+      // Verify link has no synced_at
+      let links = getAllLinks();
+      const localLink = links.find((l) => l.id === link.id);
+      expect(localLink).toBeTruthy();
+      expect(localLink!.synced_at).toBeNull();
+
+      // Pull — should NOT delete the local link (it was never synced)
+      const result = await pull(config);
+      expect(result.deleted_links).toBe(0);
+
+      links = getAllLinks();
+      expect(links.find((l) => l.id === link.id)).toBeTruthy();
     });
   });
 
@@ -899,6 +925,27 @@ describe('sync layer', () => {
       // Verify link file exists
       const linkIds = getRepoLinkIds(repoPath);
       expect(linkIds.size).toBe(1);
+    });
+
+    it('should set synced_at on links after push', () => {
+      const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
+      const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
+      const link = insertLink({
+        sourceId: e1.id,
+        targetId: e2.id,
+        linkType: 'related',
+        source: 'user',
+      });
+
+      // Before push — synced_at should be null
+      let links = getAllLinks();
+      expect(links.find((l) => l.id === link.id)!.synced_at).toBeNull();
+
+      push(config);
+
+      // After push — synced_at should be set
+      links = getAllLinks();
+      expect(links.find((l) => l.id === link.id)!.synced_at).toBeTruthy();
     });
 
     it('should clean up deleted links during push', () => {

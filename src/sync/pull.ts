@@ -283,17 +283,14 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
   }
 
   // 5. Detect remote link deletions
+  // Only delete links that have been synced before (synced_at is set).
+  // Links created locally (synced_at IS NULL) are preserved — they haven't
+  // been pushed yet, so their absence from the repo doesn't mean they were
+  // deleted remotely.
   const localLinks = getAllLinks();
 
   for (const local of localLinks) {
-    // Only delete links that were previously synced (exist in a synced context)
-    // Check if both entries are synced to infer if link was synced
-    const sourceEntry = getKnowledgeById(local.source_id);
-    const targetEntry = getKnowledgeById(local.target_id);
-
-    const bothEntriesSynced = sourceEntry?.synced_at && targetEntry?.synced_at;
-
-    if (bothEntriesSynced && !repoLinkIds.has(local.id)) {
+    if (local.synced_at && !repoLinkIds.has(local.id)) {
       // Don't delete conflict-related links
       if (local.source === 'sync:conflict') continue;
 
