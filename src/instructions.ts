@@ -43,6 +43,12 @@ accessed stays strong; unused knowledge naturally fades.
 ## Wiki entries
 
 - Wiki entries (\`type: "wiki"\`) are curated documentation pages that are exempt from memory decay.
+- Wiki entries may have a **declaration** — a human-written prompt describing what the page should
+  contain (e.g., tone, length, audience, focus). The declaration is visible in \`query_knowledge\`
+  and \`list_knowledge\` results, and is shown after \`update_knowledge\` completes.
+- **Always follow the declaration.** If it says "concise summary", write a short overview — not an
+  exhaustive reference. If it says "detailed guide", be thorough. The declaration is the page owner's
+  intent for what the content should look like.
 - When creating or updating wiki entries, you **must** link them to the source knowledge entries
   they are derived from using \`link_knowledge\` (e.g., \`derived\`, \`elaborates\`, or \`related\` link types).
 - The \`update_knowledge\` tool will warn you if a wiki entry has no outgoing links to non-wiki entries.

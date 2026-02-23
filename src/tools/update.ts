@@ -78,6 +78,13 @@ export function registerUpdateTool(server: McpServer): void {
             responseText += `\n\nCascade revalidation: flagged ${revalidated.length} linked entries as needs_revalidation:\n${revalidated.map((rid) => `  - ${rid}`).join('\n')}`;
           }
 
+          // Surface the declaration for wiki entries so agents know the intent
+          if (updated.type === 'wiki' && updated.declaration) {
+            responseText +=
+              `\n\n📋 DECLARATION: "${updated.declaration}"\n` +
+              'Ensure the content you wrote aligns with this declaration (tone, length, focus).';
+          }
+
           // Warn if a wiki entry has no outgoing links to non-wiki knowledge entries
           if (updated.type === 'wiki') {
             const outgoing = getOutgoingLinks(id);

@@ -75,6 +75,9 @@ export function registerListTool(server: McpServer): void {
             created_at: entry.created_at,
             last_accessed_at: entry.last_accessed_at,
           };
+          if (entry.declaration) {
+            result.declaration = entry.declaration;
+          }
           if (entry.deprecation_reason) {
             result.deprecation_reason = entry.deprecation_reason;
           }

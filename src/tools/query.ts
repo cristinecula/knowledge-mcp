@@ -120,6 +120,9 @@ export function registerQueryTool(server: McpServer): void {
               direction: l.source_id === entry.id ? 'outgoing' : 'incoming',
             })),
           };
+          if (entry.declaration) {
+            result.declaration = entry.declaration;
+          }
           if (entry.deprecation_reason) {
             result.deprecation_reason = entry.deprecation_reason;
           }

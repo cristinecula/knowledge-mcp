@@ -429,6 +429,78 @@ describe('wiki source links warning', () => {
   });
 });
 
+// === Wiki declaration surfacing ===
+
+describe('wiki declaration surfacing', () => {
+  it('should include declaration in query results for wiki entries', () => {
+    insertKnowledge({
+      type: 'wiki',
+      title: 'API Guide',
+      content: 'API documentation',
+      declaration: 'A concise overview of the public API',
+    });
+
+    const results = searchKnowledge({ query: 'API Guide', limit: 10 });
+    expect(results.length).toBeGreaterThan(0);
+    const entry = results[0];
+    expect(entry.declaration).toBe('A concise overview of the public API');
+  });
+
+  it('should not include declaration for non-wiki entries', () => {
+    insertKnowledge({
+      type: 'decision',
+      title: 'Use REST API',
+      content: 'We chose REST over GraphQL',
+    });
+
+    const results = searchKnowledge({ query: 'Use REST', limit: 10 });
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].declaration).toBeNull();
+  });
+
+  it('should include declaration in list results for wiki entries', () => {
+    insertKnowledge({
+      type: 'wiki',
+      title: 'Deployment Guide',
+      content: 'How to deploy',
+      declaration: 'Step-by-step deployment instructions',
+    });
+
+    const results = listKnowledge({ type: 'wiki', limit: 10 });
+    expect(results.length).toBeGreaterThan(0);
+    const entry = results.find((e) => e.title === 'Deployment Guide');
+    expect(entry).toBeDefined();
+    expect(entry!.declaration).toBe('Step-by-step deployment instructions');
+  });
+
+  it('should preserve declaration after updateKnowledgeFields', () => {
+    const wiki = insertKnowledge({
+      type: 'wiki',
+      title: 'Architecture Page',
+      content: 'Stub',
+      declaration: 'A brief, user-friendly architecture overview',
+    });
+
+    updateKnowledgeFields(wiki.id, { content: 'Updated content by agent' });
+
+    const updated = getKnowledgeById(wiki.id)!;
+    expect(updated.content).toBe('Updated content by agent');
+    expect(updated.declaration).toBe('A brief, user-friendly architecture overview');
+  });
+
+  it('should return null declaration for wiki entries without one', () => {
+    insertKnowledge({
+      type: 'wiki',
+      title: 'Quick Notes',
+      content: 'Some notes',
+    });
+
+    const results = searchKnowledge({ query: 'Quick Notes', limit: 10 });
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].declaration).toBeNull();
+  });
+});
+
 // === Link workflow ===
 
 describe('link workflow', () => {
