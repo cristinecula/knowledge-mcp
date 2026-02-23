@@ -44,6 +44,7 @@ export interface EntryJSON {
   status: Status;
   deprecation_reason?: string | null;
   declaration?: string | null;
+  parent_page_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -86,6 +87,11 @@ export function entryToJSON(entry: KnowledgeEntry): EntryJSON {
   // Only include declaration when it has a value (keep JSON clean)
   if (entry.declaration) {
     json.declaration = entry.declaration;
+  }
+
+  // Only include parent_page_id when it has a value (keep JSON clean)
+  if (entry.parent_page_id) {
+    json.parent_page_id = entry.parent_page_id;
   }
 
   return json;
@@ -160,6 +166,15 @@ export function parseEntryJSON(data: unknown): EntryJSON {
   // Declaration must be a string or null/undefined
   const declaration = typeof obj.declaration === 'string' ? obj.declaration : null;
 
+  // Parent page ID must be a valid UUID or null/undefined
+  let parent_page_id: string | null = null;
+  if (typeof obj.parent_page_id === 'string') {
+    if (!UUID_RE.test(obj.parent_page_id)) {
+      throw new Error(`Invalid parent_page_id: must be a valid UUID, got "${obj.parent_page_id}"`);
+    }
+    parent_page_id = obj.parent_page_id;
+  }
+
   const result: EntryJSON = {
     id: obj.id,
     type: obj.type as KnowledgeType,
@@ -182,6 +197,11 @@ export function parseEntryJSON(data: unknown): EntryJSON {
   // Only include declaration when it has a value
   if (declaration) {
     result.declaration = declaration;
+  }
+
+  // Only include parent_page_id when it has a value
+  if (parent_page_id) {
+    result.parent_page_id = parent_page_id;
   }
 
   return result;

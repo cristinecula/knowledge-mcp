@@ -24,7 +24,8 @@ export function initSchema(db: Database.Database): void {
       status TEXT NOT NULL DEFAULT 'active',
       synced_at TEXT,
       deprecation_reason TEXT,
-      declaration TEXT
+      declaration TEXT,
+      parent_page_id TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_type ON knowledge(type);
@@ -134,6 +135,11 @@ function migrateSchema(db: Database.Database): void {
   // Migration 4: Add declaration column (for wiki entries)
   if (!columnNames.has('declaration')) {
     db.exec(`ALTER TABLE knowledge ADD COLUMN declaration TEXT`);
+  }
+
+  // Migration 5: Add parent_page_id column (for wiki page hierarchy)
+  if (!columnNames.has('parent_page_id')) {
+    db.exec(`ALTER TABLE knowledge ADD COLUMN parent_page_id TEXT`);
   }
 
   // Backfill: ensure content_updated_at is set for any rows where it's empty

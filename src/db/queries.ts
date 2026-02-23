@@ -24,6 +24,7 @@ export interface InsertKnowledgeParams {
   scope?: Scope;
   source?: string;
   declaration?: string | null;
+  parentPageId?: string | null;
 }
 
 export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
@@ -32,8 +33,8 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
   const id = randomUUID();
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, declaration)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active', NULL, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, declaration, parent_page_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active', NULL, ?, ?)
   `);
 
   stmt.run(
@@ -50,6 +51,7 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
     now,
     now,
     params.declaration ?? null,
+    params.parentPageId ?? null,
   );
 
   return getKnowledgeById(id)!;
@@ -74,6 +76,7 @@ export function updateKnowledgeFields(
     project: string | null;
     scope: Scope;
     declaration: string | null;
+    parentPageId: string | null;
   }>,
 ): KnowledgeEntry | null {
   const db = getDb();
@@ -109,6 +112,10 @@ export function updateKnowledgeFields(
   if (fields.declaration !== undefined) {
     sets.push('declaration = ?');
     values.push(fields.declaration);
+  }
+  if (fields.parentPageId !== undefined) {
+    sets.push('parent_page_id = ?');
+    values.push(fields.parentPageId);
   }
 
   values.push(id);
@@ -564,6 +571,7 @@ export interface GraphData {
     created_at: string;
     last_accessed_at: string;
     declaration: string | null;
+    parent_page_id: string | null;
   }>;
   links: Array<{
     id: string;
@@ -599,6 +607,7 @@ export function getGraphData(): GraphData {
       created_at: e.created_at,
       last_accessed_at: e.last_accessed_at,
       declaration: e.declaration ?? null,
+      parent_page_id: e.parent_page_id ?? null,
     })),
     links: links.map((l) => ({
       id: l.id,
@@ -647,6 +656,7 @@ export interface ImportKnowledgeParams {
   status?: Status;
   deprecation_reason?: string | null;
   declaration?: string | null;
+  parent_page_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -656,8 +666,8 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
   const now = new Date().toISOString();
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, declaration)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, declaration, parent_page_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -677,6 +687,7 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
     now,                  // synced_at = now
     params.deprecation_reason ?? null,
     params.declaration ?? null,
+    params.parent_page_id ?? null,
   );
 
   return getKnowledgeById(params.id)!;
@@ -735,6 +746,7 @@ export function updateKnowledgeContent(
     updated_at?: string;
     deprecation_reason?: string | null;
     declaration?: string | null;
+    parent_page_id?: string | null;
   },
   /** When set, use this value for content_updated_at instead of now(). Used by pull to preserve remote timestamps and prevent drift. */
   contentUpdatedAtOverride?: string,
@@ -788,6 +800,10 @@ export function updateKnowledgeContent(
   if (fields.declaration !== undefined) {
     sets.push('declaration = ?');
     values.push(fields.declaration);
+  }
+  if (fields.parent_page_id !== undefined) {
+    sets.push('parent_page_id = ?');
+    values.push(fields.parent_page_id);
   }
 
   values.push(id);

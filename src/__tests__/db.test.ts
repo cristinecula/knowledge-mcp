@@ -806,3 +806,113 @@ describe('declaration field', () => {
     expect(reinserted.declaration).toBe('A prompt');
   });
 });
+
+describe('parent_page_id field', () => {
+  it('should default parent_page_id to null', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Root Wiki Page',
+      content: 'Top-level page',
+    });
+
+    expect(entry.parent_page_id).toBeNull();
+  });
+
+  it('should store parent_page_id on insert', () => {
+    const parent = insertKnowledge({
+      type: 'wiki',
+      title: 'Parent Page',
+      content: 'Parent content',
+    });
+
+    const child = insertKnowledge({
+      type: 'wiki',
+      title: 'Child Page',
+      content: 'Child content',
+      parentPageId: parent.id,
+    });
+
+    expect(child.parent_page_id).toBe(parent.id);
+  });
+
+  it('should update parent_page_id via updateKnowledgeFields', () => {
+    const parent = insertKnowledge({
+      type: 'wiki',
+      title: 'Parent Page',
+      content: '',
+    });
+
+    const child = insertKnowledge({
+      type: 'wiki',
+      title: 'Child Page',
+      content: '',
+    });
+
+    const updated = updateKnowledgeFields(child.id, {
+      parentPageId: parent.id,
+    });
+
+    expect(updated!.parent_page_id).toBe(parent.id);
+  });
+
+  it('should clear parent_page_id by setting to null', () => {
+    const parent = insertKnowledge({
+      type: 'wiki',
+      title: 'Parent',
+      content: '',
+    });
+
+    const child = insertKnowledge({
+      type: 'wiki',
+      title: 'Child',
+      content: '',
+      parentPageId: parent.id,
+    });
+
+    expect(child.parent_page_id).toBe(parent.id);
+
+    const updated = updateKnowledgeFields(child.id, { parentPageId: null });
+    expect(updated!.parent_page_id).toBeNull();
+  });
+
+  it('should not affect parent_page_id when updating other fields', () => {
+    const parent = insertKnowledge({
+      type: 'wiki',
+      title: 'Parent',
+      content: '',
+    });
+
+    const child = insertKnowledge({
+      type: 'wiki',
+      title: 'Child',
+      content: '',
+      parentPageId: parent.id,
+    });
+
+    const updated = updateKnowledgeFields(child.id, { title: 'Renamed Child' });
+    expect(updated!.title).toBe('Renamed Child');
+    expect(updated!.parent_page_id).toBe(parent.id);
+  });
+
+  it('should include parent_page_id in getGraphData nodes', () => {
+    const parent = insertKnowledge({
+      type: 'wiki',
+      title: 'Graph Parent',
+      content: '',
+    });
+
+    insertKnowledge({
+      type: 'wiki',
+      title: 'Graph Child',
+      content: '',
+      parentPageId: parent.id,
+    });
+
+    const graph = getGraphData();
+    const parentNode = graph.nodes.find((n) => n.title === 'Graph Parent');
+    const childNode = graph.nodes.find((n) => n.title === 'Graph Child');
+
+    expect(parentNode!.parent_page_id).toBeNull();
+    expect(childNode!.parent_page_id).toBe(parent.id);
+  });
+});

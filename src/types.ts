@@ -64,6 +64,7 @@ export interface KnowledgeEntry {
   synced_at: string | null;
   deprecation_reason: string | null;
   declaration: string | null;
+  parent_page_id: string | null;
 }
 
 /** Row shape as stored in SQLite (tags is a JSON string) */
@@ -86,6 +87,7 @@ export interface KnowledgeRow {
   synced_at: string | null;
   deprecation_reason: string | null;
   declaration: string | null;
+  parent_page_id: string | null;
 }
 export interface KnowledgeLink {
   id: string;

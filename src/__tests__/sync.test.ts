@@ -1224,6 +1224,203 @@ describe('sync layer', () => {
     });
   });
 
+  describe('parent_page_id serialization', () => {
+    it('should include parent_page_id in entryToJSON when set', () => {
+      const parent = insertKnowledge({
+        type: 'wiki',
+        title: 'Parent Wiki',
+        content: 'Parent content',
+      });
+
+      const child = insertKnowledge({
+        type: 'wiki',
+        title: 'Child Wiki',
+        content: 'Child content',
+        parentPageId: parent.id,
+      });
+
+      const json = entryToJSON(child);
+      expect(json.parent_page_id).toBe(parent.id);
+    });
+
+    it('should omit parent_page_id in entryToJSON when null', () => {
+      const entry = insertKnowledge({ type: 'wiki', title: 'Root Page', content: 'content' });
+
+      const json = entryToJSON(entry);
+      expect(json.parent_page_id).toBeUndefined();
+    });
+
+    it('should parse parent_page_id from entry JSON', () => {
+      const parentId = '00000000-0000-4000-a000-000000000090';
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000091',
+        type: 'wiki',
+        title: 'Parsed child page',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        parent_page_id: parentId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const parsed = parseEntryJSON(raw);
+      expect(parsed.parent_page_id).toBe(parentId);
+    });
+
+    it('should reject invalid parent_page_id UUID', () => {
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000092',
+        type: 'wiki',
+        title: 'Bad parent ref',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        parent_page_id: 'not-a-uuid',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      expect(() => parseEntryJSON(raw)).toThrow('Invalid parent_page_id');
+    });
+
+    it('should handle missing parent_page_id in parsed JSON', () => {
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000093',
+        type: 'wiki',
+        title: 'No parent',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const parsed = parseEntryJSON(raw);
+      expect(parsed.parent_page_id).toBeUndefined();
+    });
+
+    it('should round-trip parent_page_id through serialize/deserialize', () => {
+      const parent = insertKnowledge({
+        type: 'wiki',
+        title: 'Round-trip parent',
+        content: 'Parent content',
+      });
+
+      const child = insertKnowledge({
+        type: 'wiki',
+        title: 'Round-trip child',
+        content: 'Child content',
+        parentPageId: parent.id,
+      });
+
+      const json = entryToJSON(child);
+      const parsed = parseEntryJSON(json);
+
+      expect(parsed.parent_page_id).toBe(parent.id);
+    });
+
+    it('should import parent_page_id during pull', async () => {
+      ensureRepoStructure(repoPath);
+      gitCommitAll(repoPath, 'init structure');
+
+      const parentId = '00000000-0000-4000-a000-000000000094';
+      const childId = '00000000-0000-4000-a000-000000000095';
+
+      // Write parent entry
+      const parentJSON: EntryJSON = {
+        id: parentId,
+        type: 'wiki',
+        title: 'Imported parent',
+        content: 'Parent content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: '2025-01-01T00:00:00.000Z',
+        updated_at: '2025-01-02T00:00:00.000Z',
+      };
+
+      // Write child entry with parent_page_id
+      const childJSON: EntryJSON = {
+        id: childId,
+        type: 'wiki',
+        title: 'Imported child',
+        content: 'Child content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        parent_page_id: parentId,
+        created_at: '2025-01-01T00:00:00.000Z',
+        updated_at: '2025-01-02T00:00:00.000Z',
+      };
+
+      const entryDir = join(repoPath, 'entries', 'wiki');
+      mkdirSync(entryDir, { recursive: true });
+      writeFileSync(join(entryDir, `${parentId}.json`), JSON.stringify(parentJSON));
+      writeFileSync(join(entryDir, `${childId}.json`), JSON.stringify(childJSON));
+      gitCommitAll(repoPath, 'add wiki entries');
+
+      const result = await pull(config);
+      expect(result.new_entries).toBe(2);
+
+      const importedChild = getKnowledgeById(childId);
+      expect(importedChild).not.toBeNull();
+      expect(importedChild!.parent_page_id).toBe(parentId);
+    });
+
+    it('should detect content change when parent_page_id differs', () => {
+      const parent1 = insertKnowledge({ type: 'wiki', title: 'Parent 1', content: '' });
+      const parent2 = insertKnowledge({ type: 'wiki', title: 'Parent 2', content: '' });
+
+      const child = insertKnowledge({
+        type: 'wiki',
+        title: 'Child',
+        content: 'Content',
+        parentPageId: parent1.id,
+      });
+
+      // Simulate synced state — set both synced_at and content_updated_at to the past
+      const pastTime = '2025-01-01T00:00:00.000Z';
+      updateSyncedAt(child.id, pastTime);
+      getDb().prepare('UPDATE knowledge SET content_updated_at = ? WHERE id = ?').run(pastTime, child.id);
+
+      // Re-fetch so we have the updated timestamps
+      const localChild = getKnowledgeById(child.id)!;
+
+      // Remote has different parent_page_id
+      const remoteJSON: EntryJSON = {
+        id: child.id,
+        type: 'wiki',
+        title: 'Child',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'unknown',
+        status: 'active',
+        parent_page_id: parent2.id,
+        created_at: child.created_at,
+        updated_at: '2025-06-01T00:00:00.000Z',
+      };
+
+      const result = detectConflict(localChild, remoteJSON);
+      expect(result.action).toBe('remote_wins');
+    });
+  });
+
   describe('timestamp preservation on pull', () => {
     it('should preserve remote updated_at as content_updated_at on remote_wins', async () => {
       // 1. Create local entry and mark as synced in the past
