@@ -654,3 +654,137 @@ describe('getGraphData', () => {
     expect(graph.links[0].link_type).toBe('related');
   });
 });
+
+// === Wiki type and declaration field ===
+
+describe('wiki knowledge type', () => {
+  it('should insert a wiki entry with declaration', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Architecture Overview',
+      content: '',
+      declaration: 'Write a comprehensive overview of our system architecture',
+    });
+
+    expect(entry.type).toBe('wiki');
+    expect(entry.declaration).toBe('Write a comprehensive overview of our system architecture');
+    expect(entry.content).toBe('');
+  });
+
+  it('should default declaration to null when not provided', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'No declaration wiki',
+      content: 'Some content',
+    });
+
+    expect(entry.declaration).toBeNull();
+  });
+
+  it('should search wiki entries by type filter', () => {
+    insertKnowledge({ type: 'wiki', title: 'Wiki Page', content: 'wiki test content' });
+    insertKnowledge({ type: 'fact', title: 'Regular Fact', content: 'fact test content' });
+
+    const results = searchKnowledge({ query: 'test', type: 'wiki' });
+    expect(results).toHaveLength(1);
+    expect(results[0].type).toBe('wiki');
+    expect(results[0].title).toBe('Wiki Page');
+  });
+
+  it('should list wiki entries by type filter', () => {
+    insertKnowledge({ type: 'wiki', title: 'Wiki A', content: 'a' });
+    insertKnowledge({ type: 'wiki', title: 'Wiki B', content: 'b' });
+    insertKnowledge({ type: 'fact', title: 'Fact C', content: 'c' });
+
+    const results = listKnowledge({ type: 'wiki' });
+    expect(results).toHaveLength(2);
+    expect(results.every((r) => r.type === 'wiki')).toBe(true);
+  });
+});
+
+describe('declaration field', () => {
+  it('should update declaration via updateKnowledgeFields', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Wiki Page',
+      content: '',
+      declaration: 'Original prompt',
+    });
+
+    const updated = updateKnowledgeFields(entry.id, {
+      declaration: 'Updated prompt with more detail',
+    });
+
+    expect(updated!.declaration).toBe('Updated prompt with more detail');
+    expect(updated!.title).toBe('Wiki Page'); // unchanged
+  });
+
+  it('should clear declaration by setting to null', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Wiki Page',
+      content: '',
+      declaration: 'Some prompt',
+    });
+
+    const updated = updateKnowledgeFields(entry.id, { declaration: null });
+    expect(updated!.declaration).toBeNull();
+  });
+
+  it('should not affect declaration when updating other fields', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Wiki Page',
+      content: '',
+      declaration: 'Keep this prompt',
+    });
+
+    const updated = updateKnowledgeFields(entry.id, { title: 'New Title' });
+    expect(updated!.title).toBe('New Title');
+    expect(updated!.declaration).toBe('Keep this prompt');
+  });
+
+  it('should include declaration in getGraphData nodes', () => {
+    insertKnowledge({
+      type: 'wiki',
+      title: 'Wiki With Declaration',
+      content: 'Agent-filled content',
+      declaration: 'Describe the auth system',
+    });
+    insertKnowledge({
+      type: 'fact',
+      title: 'Regular Fact',
+      content: 'Content',
+    });
+
+    const graph = getGraphData();
+    const wikiNode = graph.nodes.find((n) => n.type === 'wiki');
+    const factNode = graph.nodes.find((n) => n.type === 'fact');
+
+    expect(wikiNode).toBeDefined();
+    expect(wikiNode!.declaration).toBe('Describe the auth system');
+    expect(factNode).toBeDefined();
+    expect(factNode!.declaration).toBeNull();
+  });
+
+  it('should persist declaration through delete and re-insert', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Deletable Wiki',
+      content: '',
+      declaration: 'A prompt',
+    });
+
+    deleteKnowledge(entry.id);
+    expect(getKnowledgeById(entry.id)).toBeNull();
+
+    // Re-insert with same declaration
+    const reinserted = insertKnowledge({
+      type: 'wiki',
+      title: 'Deletable Wiki',
+      content: '',
+      declaration: 'A prompt',
+    });
+    expect(reinserted.declaration).toBe('A prompt');
+  });
+});

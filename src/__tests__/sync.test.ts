@@ -1092,6 +1092,138 @@ describe('sync layer', () => {
     });
   });
 
+  describe('declaration serialization', () => {
+    it('should include declaration in entryToJSON when set', () => {
+      const entry = insertKnowledge({
+        type: 'wiki',
+        title: 'Architecture Wiki',
+        content: 'Agent-filled content',
+        declaration: 'Write about our system architecture',
+      });
+
+      const json = entryToJSON(entry);
+      expect(json.declaration).toBe('Write about our system architecture');
+      expect(json.type).toBe('wiki');
+    });
+
+    it('should omit declaration in entryToJSON when null', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Regular fact', content: 'content' });
+
+      const json = entryToJSON(entry);
+      expect(json.declaration).toBeUndefined();
+    });
+
+    it('should parse declaration from entry JSON', () => {
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000080',
+        type: 'wiki',
+        title: 'Parsed wiki entry',
+        content: 'Filled by agent',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        declaration: 'Describe the API layer',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const parsed = parseEntryJSON(raw);
+      expect(parsed.declaration).toBe('Describe the API layer');
+      expect(parsed.type).toBe('wiki');
+    });
+
+    it('should handle missing declaration in parsed JSON', () => {
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000081',
+        type: 'fact',
+        title: 'No declaration entry',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const parsed = parseEntryJSON(raw);
+      expect(parsed.declaration).toBeUndefined();
+    });
+
+    it('should round-trip declaration through serialize/deserialize', () => {
+      const entry = insertKnowledge({
+        type: 'wiki',
+        title: 'Round-trip wiki',
+        content: 'Agent content here',
+        declaration: 'Explain how authentication works end-to-end',
+      });
+
+      const json = entryToJSON(entry);
+      const parsed = parseEntryJSON(json);
+
+      expect(parsed.declaration).toBe('Explain how authentication works end-to-end');
+      expect(parsed.type).toBe('wiki');
+    });
+
+    it('should write and read declaration through file sync', () => {
+      const entry = insertKnowledge({
+        type: 'wiki',
+        title: 'File-synced wiki',
+        content: 'Content here',
+        declaration: 'Document the deployment process',
+      });
+
+      // Write to file
+      ensureRepoStructure(repoPath);
+      writeEntryFile(repoPath, entry);
+
+      // Read file back
+      const filePath = join(repoPath, 'entries', 'wiki', `${entry.id}.json`);
+      const fileContent = JSON.parse(readFileSync(filePath, 'utf-8'));
+      expect(fileContent.declaration).toBe('Document the deployment process');
+      expect(fileContent.type).toBe('wiki');
+    });
+
+    it('should import declaration during pull', async () => {
+      ensureRepoStructure(repoPath);
+      gitCommitAll(repoPath, 'init structure');
+
+      const entryId = '00000000-0000-4000-a000-000000000082';
+      const entryJSON: EntryJSON = {
+        id: entryId,
+        type: 'wiki',
+        title: 'Imported wiki page',
+        content: 'Agent-generated content',
+        tags: ['architecture'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        declaration: 'Write about our microservices architecture',
+        created_at: '2025-01-01T00:00:00.000Z',
+        updated_at: '2025-01-02T00:00:00.000Z',
+      };
+
+      // Write entry file to repo
+      const entryDir = join(repoPath, 'entries', 'wiki');
+      mkdirSync(entryDir, { recursive: true });
+      writeFileSync(join(entryDir, `${entryId}.json`), JSON.stringify(entryJSON));
+      gitCommitAll(repoPath, 'add wiki entry');
+
+      // Pull
+      const result = await pull(config);
+      expect(result.new_entries).toBe(1);
+
+      const imported = getKnowledgeById(entryId);
+      expect(imported).not.toBeNull();
+      expect(imported!.type).toBe('wiki');
+      expect(imported!.declaration).toBe('Write about our microservices architecture');
+    });
+  });
+
   describe('timestamp preservation on pull', () => {
     it('should preserve remote updated_at as content_updated_at on remote_wins', async () => {
       // 1. Create local entry and mark as synced in the past
