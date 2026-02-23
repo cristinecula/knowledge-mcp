@@ -29,6 +29,16 @@ export function getDb(dbPath?: string): Database.Database {
   db.pragma('journal_mode = WAL');
   // Enable foreign keys
   db.pragma('foreign_keys = ON');
+  // Performance: NORMAL is safe with WAL (no risk of DB corruption, only
+  // last transaction can be lost on OS crash — acceptable for our use case)
+  db.pragma('synchronous = NORMAL');
+  // Increase page cache from default 2MB to 8MB
+  db.pragma('cache_size = -8000');
+  // Wait up to 5s on SQLITE_BUSY instead of failing immediately
+  // (important when multiple MCP server processes share the same DB)
+  db.pragma('busy_timeout = 5000');
+  // Keep temp tables in memory
+  db.pragma('temp_store = MEMORY');
 
   initSchema(db);
 

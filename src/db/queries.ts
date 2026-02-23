@@ -171,6 +171,29 @@ export function recordAccess(id: string, boost: number = 1): void {
   ).run(boost, now, now, id);
 }
 
+/**
+ * Batch record access for multiple entries in a single transaction.
+ * Much faster than calling recordAccess() individually for each entry.
+ */
+export function batchRecordAccess(ids: string[], boost: number = 1): void {
+  if (ids.length === 0) return;
+  const db = getDb();
+  const now = new Date().toISOString();
+  const stmt = db.prepare(
+    `UPDATE knowledge
+     SET access_count = access_count + ?,
+         last_accessed_at = ?,
+         updated_at = ?
+     WHERE id = ?`,
+  );
+  const run = db.transaction(() => {
+    for (const id of ids) {
+      stmt.run(boost, now, now, id);
+    }
+  });
+  run();
+}
+
 // === Search ===
 
 export interface SearchParams {
@@ -415,6 +438,43 @@ export function getLinksForEntry(entryId: string): KnowledgeLink[] {
     .all(entryId, entryId) as KnowledgeLinkRow[];
 
   return rows.map(rowToLink);
+}
+
+/**
+ * Batch fetch links for multiple entries in a single query.
+ * Returns a Map from entry ID to its links. Much faster than
+ * calling getLinksForEntry() individually for each entry.
+ */
+export function getLinksForEntries(entryIds: string[]): Map<string, KnowledgeLink[]> {
+  const result = new Map<string, KnowledgeLink[]>();
+  if (entryIds.length === 0) return result;
+
+  // Initialize empty arrays for all requested entries
+  for (const id of entryIds) {
+    result.set(id, []);
+  }
+
+  const db = getDb();
+  const placeholders = entryIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT * FROM knowledge_links WHERE source_id IN (${placeholders}) OR target_id IN (${placeholders})`,
+    )
+    .all(...entryIds, ...entryIds) as KnowledgeLinkRow[];
+
+  for (const row of rows) {
+    const link = rowToLink(row);
+    // Add to source entry's links if it's in our set
+    if (result.has(link.source_id)) {
+      result.get(link.source_id)!.push(link);
+    }
+    // Add to target entry's links if it's in our set
+    if (result.has(link.target_id)) {
+      result.get(link.target_id)!.push(link);
+    }
+  }
+
+  return result;
 }
 
 export function getOutgoingLinks(

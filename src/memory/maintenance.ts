@@ -4,6 +4,7 @@ import {
   updateStrength,
   updateStatus,
 } from '../db/queries.js';
+import { getDb } from '../db/connection.js';
 import {
   STRENGTH_DORMANT_THRESHOLD,
   type KnowledgeEntry,
@@ -43,31 +44,38 @@ export function runMaintenanceSweep(): {
 
   let transitioned = 0;
 
-  for (const entry of entries) {
-    const links = linkIndex.get(entry.id) ?? [];
+  // Wrap all updates in a single transaction for performance.
+  // Without this, each updateStrength/updateStatus is its own implicit
+  // transaction with journal overhead. Batching gives 10-100x speedup.
+  const db = getDb();
+  const applyUpdates = db.transaction(() => {
+    for (const entry of entries) {
+      const links = linkIndex.get(entry.id) ?? [];
 
-    // Collect the linked entries
-    const linkedEntries: KnowledgeEntry[] = [];
-    for (const link of links) {
-      const otherId =
-        link.source_id === entry.id ? link.target_id : link.source_id;
-      const other = entryMap.get(otherId);
-      if (other) linkedEntries.push(other);
-    }
+      // Collect the linked entries
+      const linkedEntries: KnowledgeEntry[] = [];
+      for (const link of links) {
+        const otherId =
+          link.source_id === entry.id ? link.target_id : link.source_id;
+        const other = entryMap.get(otherId);
+        if (other) linkedEntries.push(other);
+      }
 
-    const newStrength = calculateNetworkStrength(entry, links, linkedEntries);
+      const newStrength = calculateNetworkStrength(entry, links, linkedEntries);
 
-    // Update strength in DB
-    updateStrength(entry.id, newStrength);
+      // Update strength in DB
+      updateStrength(entry.id, newStrength);
 
-    // Transition status based on strength (but don't touch 'needs_revalidation' or 'deprecated')
-    if (entry.status === 'active') {
-      if (newStrength < STRENGTH_DORMANT_THRESHOLD) {
-        updateStatus(entry.id, 'dormant');
-        transitioned++;
+      // Transition status based on strength (but don't touch 'needs_revalidation' or 'deprecated')
+      if (entry.status === 'active') {
+        if (newStrength < STRENGTH_DORMANT_THRESHOLD) {
+          updateStatus(entry.id, 'dormant');
+          transitioned++;
+        }
       }
     }
-  }
+  });
+  applyUpdates();
 
   return { processed: entries.length, transitioned };
 }

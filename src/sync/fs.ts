@@ -31,8 +31,14 @@ function assertWithinRoot(filePath: string, rootPath: string): void {
   }
 }
 
-/** Ensure the sync repo directory structure exists. */
+// Cache of repo paths that have been verified to have correct structure.
+// Avoids ~9 existsSync calls on every write-through after the first check.
+const verifiedRepos = new Set<string>();
+
+/** Ensure the sync repo directory structure exists. Caches result per repo path. */
 export function ensureRepoStructure(repoPath: string): void {
+  if (verifiedRepos.has(repoPath)) return;
+
   // Create entries directories for each type
   for (const type of KNOWLEDGE_TYPES) {
     const dir = resolve(repoPath, 'entries', type);
@@ -52,6 +58,8 @@ export function ensureRepoStructure(repoPath: string): void {
   if (!existsSync(metaPath)) {
     writeFileSync(metaPath, JSON.stringify({ schema_version: SYNC_SCHEMA_VERSION }, null, 2) + '\n');
   }
+
+  verifiedRepos.add(repoPath);
 }
 
 /** Get the file path for an entry JSON file. Validates path stays within repo. */

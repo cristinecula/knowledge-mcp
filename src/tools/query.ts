@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { KNOWLEDGE_TYPES, SCOPES } from '../types.js';
-import { searchKnowledge, recordAccess, getLinksForEntry } from '../db/queries.js';
+import { searchKnowledge, batchRecordAccess, getLinksForEntries } from '../db/queries.js';
 import { getEmbeddingProvider } from '../embeddings/provider.js';
 import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
 
@@ -92,14 +92,13 @@ export function registerQueryTool(server: McpServer): void {
           };
         }
 
-        // Auto-reinforce: bump access count for returned entries
-        for (const entry of finalEntries) {
-          recordAccess(entry.id, 1);
-        }
+        // Auto-reinforce: bump access count for returned entries (batched in 1 transaction)
+        batchRecordAccess(finalEntries.map((e) => e.id), 1);
 
-        // Enrich with link info
+        // Enrich with link info (batched in 1 query instead of N)
+        const allLinks = getLinksForEntries(finalEntries.map((e) => e.id));
         const results = finalEntries.map((entry) => {
-          const links = getLinksForEntry(entry.id);
+          const links = allLinks.get(entry.id) ?? [];
           const result: Record<string, unknown> = {
             id: entry.id,
             type: entry.type,

@@ -12,6 +12,7 @@ import {
   updateSyncedAt,
   updateLinkSyncedAt,
 } from '../db/queries.js';
+import { getDb } from '../db/connection.js';
 import { entryToJSON, linkToJSON } from './serialize.js';
 import {
   ensureRepoStructure,
@@ -73,54 +74,60 @@ export function push(config: import('./routing.js').SyncConfig): PushResult {
     }
   }
 
-  for (const entry of localEntries) {
-    // Skip conflict entries — they're local-only resolution artifacts
-    if (entry.title.startsWith('[Sync Conflict]')) continue;
+  // Batch all entry processing in a transaction for performance.
+  // Without this, each updateSyncedAt is its own implicit transaction.
+  const db = getDb();
+  const processEntries = db.transaction(() => {
+    for (const entry of localEntries) {
+      // Skip conflict entries — they're local-only resolution artifacts
+      if (entry.title.startsWith('[Sync Conflict]')) continue;
 
-    localEntryIds.add(entry.id);
+      localEntryIds.add(entry.id);
 
-    // Resolve target repo
-    const targetRepo = resolveRepoForScope(entry.scope, entry.project, config);
-    const repoPath = targetRepo.path;
-    entryRepoMap.set(entry.id, repoPath);
+      // Resolve target repo
+      const targetRepo = resolveRepoForScope(entry.scope, entry.project, config);
+      const repoPath = targetRepo.path;
+      entryRepoMap.set(entry.id, repoPath);
 
-    // Serialize and compare against existing file to skip unnecessary writes.
-    // This prevents spurious git commits when the entry hasn't actually changed
-    // (e.g., after a pull→push cycle where only local metadata like access_count changed).
-    const json = entryToJSON(entry);
-    const serialized = JSON.stringify(json, null, 2) + '\n';
-    const existing = readEntryFileRaw(repoPath, entry.type, entry.id);
+      // Serialize and compare against existing file to skip unnecessary writes.
+      // This prevents spurious git commits when the entry hasn't actually changed
+      // (e.g., after a pull→push cycle where only local metadata like access_count changed).
+      const json = entryToJSON(entry);
+      const serialized = JSON.stringify(json, null, 2) + '\n';
+      const existing = readEntryFileRaw(repoPath, entry.type, entry.id);
 
-    if (existing === serialized) {
-      // File is byte-identical — skip write
-      updateSyncedAt(entry.id);
-    } else {
-      // File changed or is new — write it
-      writeEntryFile(repoPath, json);
-      updateSyncedAt(entry.id);
-      touchedRepos.add(repoPath);
-    }
-    
-    // Check if new or updated
-    const existingInTarget = initialRepoState.get(repoPath)?.has(entry.id);
-    if (existingInTarget) {
-      result.updated++;
-    } else {
-      // Check if it existed in ANY repo (moved = updated, not new)
-      let existedAnywhere = false;
-      for (const ids of initialRepoState.values()) {
-        if (ids.has(entry.id)) {
-          existedAnywhere = true;
-          break;
-        }
+      if (existing === serialized) {
+        // File is byte-identical — skip write
+        updateSyncedAt(entry.id);
+      } else {
+        // File changed or is new — write it
+        writeEntryFile(repoPath, json);
+        updateSyncedAt(entry.id);
+        touchedRepos.add(repoPath);
       }
-      if (existedAnywhere) {
+      
+      // Check if new or updated
+      const existingInTarget = initialRepoState.get(repoPath)?.has(entry.id);
+      if (existingInTarget) {
         result.updated++;
       } else {
-        result.new_entries++;
+        // Check if it existed in ANY repo (moved = updated, not new)
+        let existedAnywhere = false;
+        for (const ids of initialRepoState.values()) {
+          if (ids.has(entry.id)) {
+            existedAnywhere = true;
+            break;
+          }
+        }
+        if (existedAnywhere) {
+          result.updated++;
+        } else {
+          result.new_entries++;
+        }
       }
     }
-  }
+  });
+  processEntries();
 
   // === Clean up old files (moves, type changes, deletions) ===
 
@@ -153,30 +160,34 @@ export function push(config: import('./routing.js').SyncConfig): PushResult {
   const localLinkIds = new Set<string>();
   const linkRepoMap = new Map<string, string>();
 
-  for (const link of localLinks) {
-    // Skip conflict-related links
-    if (link.source === 'sync:conflict') continue;
+  // Batch link processing in a transaction for performance.
+  const processLinks = db.transaction(() => {
+    for (const link of localLinks) {
+      // Skip conflict-related links
+      if (link.source === 'sync:conflict') continue;
 
-    localLinkIds.add(link.id);
+      localLinkIds.add(link.id);
 
-    // Resolve repo based on source entry's repo
-    const sourceRepo = entryRepoMap.get(link.source_id);
-    
-    if (sourceRepo) {
-      const json = linkToJSON(link);
-      writeLinkFile(sourceRepo, json);
-      linkRepoMap.set(link.id, sourceRepo);
-      touchedRepos.add(sourceRepo);
+      // Resolve repo based on source entry's repo
+      const sourceRepo = entryRepoMap.get(link.source_id);
+      
+      if (sourceRepo) {
+        const json = linkToJSON(link);
+        writeLinkFile(sourceRepo, json);
+        linkRepoMap.set(link.id, sourceRepo);
+        touchedRepos.add(sourceRepo);
 
-      // Count as new if never synced before
-      if (!link.synced_at) {
-        result.new_links++;
+        // Count as new if never synced before
+        if (!link.synced_at) {
+          result.new_links++;
+        }
+
+        // Mark link as synced
+        updateLinkSyncedAt(link.id);
       }
-
-      // Mark link as synced
-      updateLinkSyncedAt(link.id);
     }
-  }
+  });
+  processLinks();
 
   // === Clean up old link files ===
 

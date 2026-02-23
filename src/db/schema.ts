@@ -168,6 +168,20 @@ function migrateSchema(db: Database.Database): void {
     `);
   }
 
-  // Backfill: ensure content_updated_at is set for any rows where it's empty
-  db.exec(`UPDATE knowledge SET content_updated_at = updated_at WHERE content_updated_at = ''`);
+  // Migration 8: Composite index for the most common query pattern (status + strength filter)
+  const hasStatusStrengthIdx = db.prepare(
+    `SELECT 1 FROM pragma_index_list('knowledge') WHERE name = 'idx_knowledge_status_strength'`,
+  ).get();
+  if (!hasStatusStrengthIdx) {
+    db.exec('CREATE INDEX idx_knowledge_status_strength ON knowledge(status, strength)');
+  }
+
+  // Backfill: ensure content_updated_at is set for any rows where it's empty.
+  // Only run if there are actually rows to fix (avoids full-table scan on every startup).
+  const needsBackfill = db.prepare(
+    `SELECT 1 FROM knowledge WHERE content_updated_at = '' LIMIT 1`,
+  ).get();
+  if (needsBackfill) {
+    db.exec(`UPDATE knowledge SET content_updated_at = updated_at WHERE content_updated_at = ''`);
+  }
 }
