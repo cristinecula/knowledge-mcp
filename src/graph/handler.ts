@@ -280,6 +280,21 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     const source = typeof body.source === 'string' && body.source.trim() ? body.source.trim() : 'wiki-ui';
     const sourceLinks = Array.isArray(body.sourceLinks) ? body.sourceLinks.filter((id): id is string => typeof id === 'string') : [];
 
+    // Validate parentPageId if provided
+    let parentPageId: string | null = null;
+    if (typeof body.parentPageId === 'string' && body.parentPageId.trim()) {
+      const parentEntry = getKnowledgeById(body.parentPageId.trim());
+      if (!parentEntry) {
+        sendError(res, `Parent page not found: ${body.parentPageId}`, 400);
+        return;
+      }
+      if (parentEntry.type !== 'wiki') {
+        sendError(res, 'Parent must be a wiki page', 400);
+        return;
+      }
+      parentPageId = parentEntry.id;
+    }
+
     try {
       const entry = insertKnowledge({
         type: 'wiki',
@@ -290,6 +305,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         scope,
         source,
         declaration,
+        parentPageId,
       });
 
       // Mark as needs_revalidation so agents discover it
@@ -358,6 +374,26 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       }
       if (typeof body.scope === 'string' && (SCOPES as readonly string[]).includes(body.scope)) {
         fields.scope = body.scope;
+      }
+      if (body.parentPageId !== undefined) {
+        if (body.parentPageId === null || body.parentPageId === '') {
+          fields.parentPageId = null;
+        } else if (typeof body.parentPageId === 'string') {
+          const parentEntry = getKnowledgeById(body.parentPageId.trim());
+          if (!parentEntry) {
+            sendError(res, `Parent page not found: ${body.parentPageId}`, 400);
+            return;
+          }
+          if (parentEntry.type !== 'wiki') {
+            sendError(res, 'Parent must be a wiki page', 400);
+            return;
+          }
+          if (parentEntry.id === id) {
+            sendError(res, 'A page cannot be its own parent', 400);
+            return;
+          }
+          fields.parentPageId = parentEntry.id;
+        }
       }
 
       updateKnowledgeFields(id, fields as Parameters<typeof updateKnowledgeFields>[1]);
