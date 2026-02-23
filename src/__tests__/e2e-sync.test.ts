@@ -274,6 +274,397 @@ describe('e2e sync', { timeout: TEST_TIMEOUT }, () => {
   });
 
   // =====================================================================
+  // 2b. Divergent edits — advanced conflict resolution
+  // =====================================================================
+  describe('divergent edits — advanced conflict resolution', () => {
+    let remote: string;
+    let agentA: AgentHandle;
+    let agentB: AgentHandle;
+    let agentC: AgentHandle;
+
+    beforeEach(async () => {
+      remote = createBareRemote();
+    });
+
+    afterEach(async () => {
+      if (agentA) await destroyAgent(agentA);
+      if (agentB) await destroyAgent(agentB);
+      if (agentC) await destroyAgent(agentC);
+      destroyRemote(remote);
+    });
+
+    it('should preserve both versions with substantially different field changes', async () => {
+      agentA = await spawnAgent(remote, 'alice');
+
+      // Create entry with rich initial fields
+      const entry = await storeEntry(agentA, {
+        title: 'Original entry',
+        content: 'Original content for divergent test',
+        tags: ['alpha', 'beta'],
+        type: 'fact',
+        scope: 'company',
+      });
+      await syncAgent(agentA, 'push');
+
+      // Agent B pulls the entry
+      agentB = await spawnAgent(remote, 'bob');
+      await syncAgent(agentB, 'pull');
+
+      // Alice modifies substantially — title, content, tags, project
+      // (type is kept the same to avoid git-level file path conflicts
+      //  since type changes move files between directories)
+      await callTool(agentA, 'update_knowledge', {
+        id: entry.id,
+        title: 'Alice refactored entry',
+        content: 'Alice completely rewrote this with new approach',
+        tags: ['alice-tag', 'refactored'],
+        project: 'alice-project',
+      });
+
+      // Bob modifies the same entry with completely different changes
+      await callTool(agentB, 'update_knowledge', {
+        id: entry.id,
+        title: 'Bob improved entry',
+        content: 'Bob added detailed implementation notes here',
+        tags: ['bob-tag', 'detailed'],
+        project: 'bob-project',
+      });
+
+      // Alice pushes first, Bob pulls
+      await syncAgent(agentA, 'push');
+      const pullResult = await syncAgent(agentB, 'pull');
+      const pulled = pullResult.pulled as Record<string, unknown>;
+      expect(pulled.conflicts).toBe(1);
+
+      const conflictDetails = pullResult.conflict_details as Array<{
+        original_id: string;
+        conflict_id: string;
+        title: string;
+      }>;
+      expect(conflictDetails).toHaveLength(1);
+      expect(conflictDetails[0].original_id).toBe(entry.id);
+
+      // The original entry on Bob's side should still have Bob's content
+      const origResults = await queryEntries(agentB, 'Bob improved');
+      const original = origResults.results.find((r: Record<string, unknown>) => r.id === entry.id);
+      expect(original).toBeTruthy();
+      expect(original!.title).toBe('Bob improved entry');
+      expect(original!.content).toContain('Bob added detailed implementation notes');
+
+      // The conflict entry should have Alice's content (remote version)
+      const conflictResults = await queryEntries(agentB, 'Sync Conflict');
+      const conflict = conflictResults.results.find(
+        (r: Record<string, unknown>) => r.id === conflictDetails[0].conflict_id,
+      );
+      expect(conflict).toBeTruthy();
+      expect(conflict!.title).toContain('Alice refactored entry');
+      expect(conflict!.content).toContain('Alice completely rewrote this');
+      // Conflict entry should preserve Alice's tags
+      expect(conflict!.tags).toContain('alice-tag');
+      expect(conflict!.tags).toContain('refactored');
+    });
+
+    it('should not conflict when both agents make identical changes', async () => {
+      agentA = await spawnAgent(remote, 'alice');
+
+      const entry = await storeEntry(agentA, {
+        title: 'Convergent entry',
+        content: 'Will be edited identically by both',
+      });
+      await syncAgent(agentA, 'push');
+
+      // Agent B pulls
+      agentB = await spawnAgent(remote, 'bob');
+      await syncAgent(agentB, 'pull');
+
+      // Both agents make the EXACT same change
+      const identicalUpdate = {
+        id: entry.id,
+        title: 'Converged title',
+        content: 'Both agents wrote exactly this',
+      };
+      await callTool(agentA, 'update_knowledge', identicalUpdate);
+      await callTool(agentB, 'update_knowledge', identicalUpdate);
+
+      // Alice pushes, Bob pulls
+      await syncAgent(agentA, 'push');
+      const pullResult = await syncAgent(agentB, 'pull');
+      const pulled = pullResult.pulled as Record<string, unknown>;
+
+      // No conflict — identical edits are treated as no_change
+      expect(pulled.conflicts).toBe(0);
+
+      // No [Sync Conflict] entries should exist
+      const conflictResults = await queryEntries(agentB, 'Sync Conflict');
+      const hasConflict = conflictResults.results.some(
+        (r: Record<string, unknown>) => (r.title as string).includes('[Sync Conflict]'),
+      );
+      expect(hasConflict).toBe(false);
+
+      // Bob should have the converged content
+      const results = await queryEntries(agentB, 'Converged title');
+      const updated = results.results.find((r: Record<string, unknown>) => r.id === entry.id);
+      expect(updated).toBeTruthy();
+      expect(updated!.title).toBe('Converged title');
+    });
+
+    it('should not push conflict entries to the remote', async () => {
+      agentA = await spawnAgent(remote, 'alice');
+
+      const entry = await storeEntry(agentA, {
+        title: 'Push isolation test',
+        content: 'Original content',
+      });
+      await syncAgent(agentA, 'push');
+
+      // Bob pulls and both modify
+      agentB = await spawnAgent(remote, 'bob');
+      await syncAgent(agentB, 'pull');
+
+      await callTool(agentA, 'update_knowledge', {
+        id: entry.id,
+        content: 'Alice version for push test',
+      });
+      await callTool(agentB, 'update_knowledge', {
+        id: entry.id,
+        content: 'Bob version for push test',
+      });
+
+      // Alice pushes, Bob pulls (creates conflict), then Bob pushes
+      await syncAgent(agentA, 'push');
+      const pullResult = await syncAgent(agentB, 'pull');
+      const pulled = pullResult.pulled as Record<string, unknown>;
+      expect(pulled.conflicts).toBe(1);
+
+      // Bob pushes — conflict entry should NOT be pushed to remote
+      await syncAgent(agentB, 'push');
+
+      // Spawn a third agent (Charlie) who pulls from the remote
+      agentC = await spawnAgent(remote, 'charlie');
+      await syncAgent(agentC, 'pull');
+
+      // Charlie should NOT see any [Sync Conflict] entries
+      const charlieResults = await callTool(agentC, 'list_knowledge', {
+        status: 'all',
+        limit: 100,
+      }) as Record<string, unknown>;
+      const charlieEntries = (charlieResults.results ?? []) as Array<Record<string, unknown>>;
+      const conflictOnRemote = charlieEntries.some(
+        (r) => (r.title as string).includes('[Sync Conflict]'),
+      );
+      expect(conflictOnRemote).toBe(false);
+
+      // Charlie should see the original entry (Bob's local version was pushed)
+      const originalOnCharlie = charlieEntries.find((r) => r.id === entry.id);
+      expect(originalOnCharlie).toBeTruthy();
+    });
+
+    it('should not delete conflict entries when they are absent from the remote', async () => {
+      agentA = await spawnAgent(remote, 'alice');
+
+      const entry = await storeEntry(agentA, {
+        title: 'Survival test',
+        content: 'Will generate a conflict entry that must survive re-sync',
+      });
+      await syncAgent(agentA, 'push');
+
+      // Bob pulls and both modify
+      agentB = await spawnAgent(remote, 'bob');
+      await syncAgent(agentB, 'pull');
+
+      await callTool(agentA, 'update_knowledge', {
+        id: entry.id,
+        content: 'Alice changed this',
+      });
+      await callTool(agentB, 'update_knowledge', {
+        id: entry.id,
+        content: 'Bob changed this',
+      });
+
+      // Create conflict
+      await syncAgent(agentA, 'push');
+      const pullResult = await syncAgent(agentB, 'pull');
+      const conflictDetails = pullResult.conflict_details as Array<{
+        original_id: string;
+        conflict_id: string;
+      }>;
+      expect(conflictDetails).toHaveLength(1);
+      const conflictId = conflictDetails[0].conflict_id;
+
+      // Verify conflict entry exists before re-sync
+      let conflictQuery = await queryEntries(agentB, 'Sync Conflict');
+      let conflictEntry = conflictQuery.results.find(
+        (r: Record<string, unknown>) => r.id === conflictId,
+      );
+      expect(conflictEntry).toBeTruthy();
+
+      // Bob does a full sync cycle (push + pull) — conflict entry is absent from
+      // the remote (it was never pushed), but should NOT be deleted locally
+      await syncAgent(agentB, 'both');
+
+      // Verify conflict entry still exists after re-sync
+      conflictQuery = await queryEntries(agentB, 'Sync Conflict');
+      conflictEntry = conflictQuery.results.find(
+        (r: Record<string, unknown>) => r.id === conflictId,
+      );
+      expect(conflictEntry).toBeTruthy();
+      expect(conflictEntry!.status).toBe('needs_revalidation');
+    });
+
+    it('should handle multiple simultaneous conflicts in a single pull', async () => {
+      agentA = await spawnAgent(remote, 'alice');
+
+      // Create two entries
+      const entry1 = await storeEntry(agentA, {
+        title: 'Multi conflict entry 1',
+        content: 'First entry for multi-conflict test',
+      });
+      const entry2 = await storeEntry(agentA, {
+        title: 'Multi conflict entry 2',
+        content: 'Second entry for multi-conflict test',
+      });
+      await syncAgent(agentA, 'push');
+
+      // Bob pulls both entries
+      agentB = await spawnAgent(remote, 'bob');
+      await syncAgent(agentB, 'pull');
+
+      // Both agents modify BOTH entries with different content
+      await callTool(agentA, 'update_knowledge', {
+        id: entry1.id,
+        title: 'Alice entry 1',
+        content: 'Alice modified entry 1',
+      });
+      await callTool(agentA, 'update_knowledge', {
+        id: entry2.id,
+        title: 'Alice entry 2',
+        content: 'Alice modified entry 2',
+      });
+      await callTool(agentB, 'update_knowledge', {
+        id: entry1.id,
+        title: 'Bob entry 1',
+        content: 'Bob modified entry 1',
+      });
+      await callTool(agentB, 'update_knowledge', {
+        id: entry2.id,
+        title: 'Bob entry 2',
+        content: 'Bob modified entry 2',
+      });
+
+      // Alice pushes, Bob pulls
+      await syncAgent(agentA, 'push');
+      const pullResult = await syncAgent(agentB, 'pull');
+      const pulled = pullResult.pulled as Record<string, unknown>;
+      expect(pulled.conflicts).toBe(2);
+
+      const conflictDetails = pullResult.conflict_details as Array<{
+        original_id: string;
+        conflict_id: string;
+        title: string;
+      }>;
+      expect(conflictDetails).toHaveLength(2);
+
+      // Both original entry IDs should be in the conflict details
+      const conflictOriginalIds = conflictDetails.map((d) => d.original_id);
+      expect(conflictOriginalIds).toContain(entry1.id);
+      expect(conflictOriginalIds).toContain(entry2.id);
+
+      // Two separate [Sync Conflict] entries should exist
+      const conflictResults = await queryEntries(agentB, 'Sync Conflict');
+      const conflictEntries = conflictResults.results.filter(
+        (r: Record<string, unknown>) => (r.title as string).includes('[Sync Conflict]'),
+      );
+      expect(conflictEntries.length).toBe(2);
+
+      // Each conflict entry should have a contradicts link to its corresponding original
+      for (const detail of conflictDetails) {
+        const conflictEntry = conflictEntries.find(
+          (r: Record<string, unknown>) => r.id === detail.conflict_id,
+        );
+        expect(conflictEntry).toBeTruthy();
+        expect(conflictEntry!.status).toBe('needs_revalidation');
+
+        const links = (conflictEntry!.links ?? []) as Array<{
+          link_type: string;
+          linked_entry_id: string;
+        }>;
+        const contradictsLink = links.find(
+          (l) => l.link_type === 'contradicts' && l.linked_entry_id === detail.original_id,
+        );
+        expect(contradictsLink).toBeTruthy();
+      }
+    });
+
+    it('should preserve conflict links with source sync:conflict across sync cycles', async () => {
+      agentA = await spawnAgent(remote, 'alice');
+
+      const entry = await storeEntry(agentA, {
+        title: 'Link survival test',
+        content: 'Testing that conflict links persist across syncs',
+      });
+      await syncAgent(agentA, 'push');
+
+      // Bob pulls and both modify
+      agentB = await spawnAgent(remote, 'bob');
+      await syncAgent(agentB, 'pull');
+
+      await callTool(agentA, 'update_knowledge', {
+        id: entry.id,
+        content: 'Alice link-survival version',
+      });
+      await callTool(agentB, 'update_knowledge', {
+        id: entry.id,
+        content: 'Bob link-survival version',
+      });
+
+      // Create conflict
+      await syncAgent(agentA, 'push');
+      const pullResult = await syncAgent(agentB, 'pull');
+      const conflictDetails = pullResult.conflict_details as Array<{
+        original_id: string;
+        conflict_id: string;
+      }>;
+      expect(conflictDetails).toHaveLength(1);
+      const conflictId = conflictDetails[0].conflict_id;
+
+      // Verify contradicts link exists initially
+      let conflictQuery = await queryEntries(agentB, 'Sync Conflict');
+      let conflictEntry = conflictQuery.results.find(
+        (r: Record<string, unknown>) => r.id === conflictId,
+      );
+      expect(conflictEntry).toBeTruthy();
+      let links = (conflictEntry!.links ?? []) as Array<{
+        link_type: string;
+        linked_entry_id: string;
+      }>;
+      let contradictsLink = links.find(
+        (l) => l.link_type === 'contradicts' && l.linked_entry_id === entry.id,
+      );
+      expect(contradictsLink).toBeTruthy();
+
+      // Bob pushes (conflict entry + link NOT pushed) then pulls again
+      await syncAgent(agentB, 'push');
+      await syncAgent(agentB, 'pull');
+
+      // The contradicts link should still exist — not deleted by remote link
+      // deletion logic (links with source 'sync:conflict' are protected)
+      conflictQuery = await queryEntries(agentB, 'Sync Conflict');
+      conflictEntry = conflictQuery.results.find(
+        (r: Record<string, unknown>) => r.id === conflictId,
+      );
+      expect(conflictEntry).toBeTruthy();
+      links = (conflictEntry!.links ?? []) as Array<{
+        link_type: string;
+        linked_entry_id: string;
+      }>;
+      contradictsLink = links.find(
+        (l) => l.link_type === 'contradicts' && l.linked_entry_id === entry.id,
+      );
+      expect(contradictsLink).toBeTruthy();
+    });
+  });
+
+  // =====================================================================
   // 3. Multi-repo routing
   // =====================================================================
   describe('multi-repo routing', () => {
