@@ -451,10 +451,12 @@ function navigateSearchResult(delta) {
 
   searchIndex = (searchIndex + delta + searchResults.length) % searchResults.length;
   updateSearchNav();
-  // Re-render first to update focused node highlight, then zoom
-  // (render creates a new simulation that inherits x/y from the data objects)
+  const focusedId = searchResults[searchIndex].id;
+  selectedNodeId = focusedId;
+  showSidebar(focusedId);
+  // Re-render to update focused node highlight, then zoom
   render(graphData);
-  zoomToNode(searchResults[searchIndex].id);
+  zoomToNode(focusedId);
 }
 
 /**
@@ -486,6 +488,8 @@ const handleSearch = debounce(async (query) => {
     searchMatchIds = new Set();
     searchResults = [];
     searchIndex = -1;
+    selectedNodeId = null;
+    sidebar.classList.remove('open');
     updateSearchNav();
     render(graphData);
     return;
@@ -510,9 +514,12 @@ const handleSearch = debounce(async (query) => {
     updateSearchNav();
     render(graphData);
 
-    // Zoom to the most relevant result
+    // Zoom to the most relevant result and show its details
     if (searchResults.length > 0) {
-      zoomToNode(searchResults[0].id);
+      const firstId = searchResults[0].id;
+      selectedNodeId = firstId;
+      showSidebar(firstId);
+      zoomToNode(firstId);
     }
   } catch (err) {
     console.error('Search failed:', err);
@@ -532,6 +539,8 @@ filterSearch.addEventListener('keydown', (e) => {
     searchMatchIds = new Set();
     searchResults = [];
     searchIndex = -1;
+    selectedNodeId = null;
+    sidebar.classList.remove('open');
     updateSearchNav();
     render(graphData);
   } else if (e.key === 'Enter' && searchActive && searchResults.length > 0) {
