@@ -41,6 +41,8 @@ let simulation = null;
 let selectedNodeId = null;
 let searchMatchIds = new Set(); // IDs of nodes matching the current search
 let searchActive = false; // Whether a search is currently active
+let searchResults = []; // Ordered array of {id, title, type, score} from search API
+let searchIndex = -1; // Index of the currently focused search result (-1 = none)
 
 // DOM refs
 const svg = d3.select('#graph');
@@ -55,6 +57,10 @@ const filterScope = document.getElementById('filter-scope');
 const filterStatus = document.getElementById('filter-status');
 const filterSearch = document.getElementById('filter-search');
 const btnRefresh = document.getElementById('btn-refresh');
+const searchNav = document.getElementById('search-nav');
+const searchNavCounter = document.getElementById('search-nav-counter');
+const btnSearchPrev = document.getElementById('btn-search-prev');
+const btnSearchNext = document.getElementById('btn-search-next');
 
 // Zoom
 const zoomGroup = svg.append('g');
@@ -196,13 +202,17 @@ function render(data) {
       return baseOpacity;
     })
     .attr('stroke', d => {
+      const focusedId = searchResults[searchIndex]?.id;
+      if (searchActive && d.id === focusedId) return '#f0c040';
       if (searchActive && searchMatchIds.has(d.id)) return '#f0f6fc';
       if (d.status === 'needs_revalidation') return '#d29922';
       if (d.id === selectedNodeId) return '#f0f6fc';
       return 'none';
     })
     .attr('stroke-width', d => {
-      if (searchActive && searchMatchIds.has(d.id)) return 2.5;
+      const focusedId = searchResults[searchIndex]?.id;
+      if (searchActive && d.id === focusedId) return 3.5;
+      if (searchActive && searchMatchIds.has(d.id)) return 2;
       if (d.status === 'needs_revalidation') return 3;
       if (d.id === selectedNodeId) return 2;
       return 0;
@@ -408,57 +418,55 @@ btnRefresh.addEventListener('click', async () => {
 // --- Search functionality ---
 
 /**
- * Zoom/pan to fit all nodes with the given IDs in view.
- * If no IDs provided or no matching nodes found, resets to fit all.
+ * Zoom/pan to center a single node by ID at a comfortable zoom level.
  */
-function zoomToFitNodes(nodeIds) {
-  if (!simulation || !nodeIds || nodeIds.size === 0) return;
+function zoomToNode(nodeId) {
+  if (!simulation || !nodeId) return;
 
   // Wait for simulation to settle a bit before zooming
   setTimeout(() => {
-    const matchingNodes = simulation.nodes().filter(n => nodeIds.has(n.id));
-    if (matchingNodes.length === 0) return;
+    const node = simulation.nodes().find(n => n.id === nodeId);
+    if (!node || node.x == null || node.y == null) return;
 
-    const padding = 80;
     const width = window.innerWidth;
     const height = window.innerHeight;
-
-    // Compute bounding box of matching nodes
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of matchingNodes) {
-      if (n.x < minX) minX = n.x;
-      if (n.y < minY) minY = n.y;
-      if (n.x > maxX) maxX = n.x;
-      if (n.y > maxY) maxY = n.y;
-    }
-
-    // Add padding
-    minX -= padding;
-    minY -= padding;
-    maxX += padding;
-    maxY += padding;
-
-    const boxWidth = maxX - minX;
-    const boxHeight = maxY - minY;
-
-    // Calculate scale and translate to center the bounding box
-    const scale = Math.min(
-      width / boxWidth,
-      height / boxHeight,
-      2, // max zoom
-    );
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
+    const scale = 1.5;
 
     const transform = d3.zoomIdentity
       .translate(width / 2, height / 2)
       .scale(scale)
-      .translate(-cx, -cy);
+      .translate(-node.x, -node.y);
 
     svg.transition()
-      .duration(500)
+      .duration(400)
       .call(zoom.transform, transform);
-  }, 300);
+  }, 200);
+}
+
+/**
+ * Navigate search results by delta (+1 = next, -1 = prev). Wraps around.
+ */
+function navigateSearchResult(delta) {
+  if (searchResults.length === 0) return;
+
+  searchIndex = (searchIndex + delta + searchResults.length) % searchResults.length;
+  updateSearchNav();
+  // Re-render first to update focused node highlight, then zoom
+  // (render creates a new simulation that inherits x/y from the data objects)
+  render(graphData);
+  zoomToNode(searchResults[searchIndex].id);
+}
+
+/**
+ * Update the search navigation bar visibility and counter text.
+ */
+function updateSearchNav() {
+  if (searchActive && searchResults.length > 0) {
+    searchNav.style.display = 'flex';
+    searchNavCounter.textContent = `${searchIndex + 1} / ${searchResults.length}`;
+  } else {
+    searchNav.style.display = 'none';
+  }
 }
 
 // Debounce utility
@@ -476,6 +484,9 @@ const handleSearch = debounce(async (query) => {
     // Clear search
     searchActive = false;
     searchMatchIds = new Set();
+    searchResults = [];
+    searchIndex = -1;
+    updateSearchNav();
     render(graphData);
     return;
   }
@@ -484,19 +495,24 @@ const handleSearch = debounce(async (query) => {
     const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}&limit=50`);
     const data = await res.json();
 
+    searchActive = true;
+
     if (data.results && data.results.length > 0) {
-      searchActive = true;
-      searchMatchIds = new Set(data.results.map(r => r.id));
+      searchResults = data.results; // Ordered by relevance
+      searchMatchIds = new Set(searchResults.map(r => r.id));
+      searchIndex = 0; // Focus on the most relevant result
     } else {
-      searchActive = true;
-      searchMatchIds = new Set(); // No matches — dim everything
+      searchResults = [];
+      searchMatchIds = new Set();
+      searchIndex = -1;
     }
 
+    updateSearchNav();
     render(graphData);
 
-    // Auto-zoom to matching nodes
-    if (searchMatchIds.size > 0) {
-      zoomToFitNodes(searchMatchIds);
+    // Zoom to the most relevant result
+    if (searchResults.length > 0) {
+      zoomToNode(searchResults[0].id);
     }
   } catch (err) {
     console.error('Search failed:', err);
@@ -508,15 +524,25 @@ filterSearch.addEventListener('input', (e) => {
   handleSearch(e.target.value);
 });
 
-// Clear search on Escape
+// Search keyboard navigation
 filterSearch.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     filterSearch.value = '';
     searchActive = false;
     searchMatchIds = new Set();
+    searchResults = [];
+    searchIndex = -1;
+    updateSearchNav();
     render(graphData);
+  } else if (e.key === 'Enter' && searchActive && searchResults.length > 0) {
+    e.preventDefault();
+    navigateSearchResult(e.shiftKey ? -1 : 1);
   }
 });
+
+// Search navigation buttons
+btnSearchPrev.addEventListener('click', () => navigateSearchResult(-1));
+btnSearchNext.addEventListener('click', () => navigateSearchResult(1));
 
 // Handle window resize
 window.addEventListener('resize', () => {
