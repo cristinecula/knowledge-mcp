@@ -60,10 +60,20 @@ export function detectConflict(
   }
 
   if (remoteChanged && !localChanged) {
+    // Guard: if only timestamps differ but content is identical, treat as no_change.
+    // This prevents flip-flop when an older version of the code sets
+    // content_updated_at = now() on every pull, producing spurious timestamp
+    // differences with no semantic change.
+    if (contentEquals(local, remote)) {
+      return { action: 'no_change' };
+    }
     return { action: 'remote_wins' };
   }
 
   if (localChanged && !remoteChanged) {
+    if (contentEquals(local, remote)) {
+      return { action: 'no_change' };
+    }
     return { action: 'local_wins' };
   }
 

@@ -403,9 +403,9 @@ describe('sync layer', () => {
       const past = '2020-01-01T00:00:00.000Z';
       const now = new Date().toISOString();
       // local hasn't changed since sync (synced_at >= content_updated_at)
-      const local: any = { content_updated_at: past, synced_at: past };
+      const local: any = { content_updated_at: past, synced_at: past, content: 'old' };
       // remote has changed (updated_at > synced_at)
-      const remote: any = { updated_at: now };
+      const remote: any = { updated_at: now, content: 'new' };
 
       const result = detectConflict(local, remote);
       expect(result.action).toBe('remote_wins');
@@ -415,9 +415,9 @@ describe('sync layer', () => {
       const past = '2020-01-01T00:00:00.000Z';
       const now = new Date().toISOString();
       // local changed since sync (content_updated_at > synced_at)
-      const local: any = { content_updated_at: now, synced_at: past };
+      const local: any = { content_updated_at: now, synced_at: past, content: 'new' };
       // remote hasn't changed since sync (updated_at <= synced_at)
-      const remote: any = { updated_at: past };
+      const remote: any = { updated_at: past, content: 'old' };
 
       const result = detectConflict(local, remote);
       expect(result.action).toBe('local_wins');
@@ -434,6 +434,105 @@ describe('sync layer', () => {
 
       const result = detectConflict(local, remote);
       expect(result.action).toBe('conflict');
+    });
+
+    it('should return no_change when remote timestamp differs but content is identical', () => {
+      // Simulates the flip-flop bug: an older version of knowledge-mcp sets
+      // content_updated_at = now() on every pull, producing a different
+      // remote.updated_at with no actual content change.
+      const syncedAt = '2026-01-01T00:00:00.000Z';
+      const remoteTimestamp = '2026-01-01T01:00:00.000Z'; // newer than synced_at
+      const local: any = {
+        type: 'fact',
+        title: 'Test entry',
+        content: 'Same content',
+        tags: ['a', 'b'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        content_updated_at: syncedAt,
+        synced_at: syncedAt,
+      };
+      const remote: any = {
+        type: 'fact',
+        title: 'Test entry',
+        content: 'Same content',
+        tags: ['a', 'b'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        updated_at: remoteTimestamp,
+      };
+
+      const result = detectConflict(local, remote);
+      // remote.updated_at > synced_at so remoteChanged=true, but content is
+      // identical → should be no_change, not remote_wins
+      expect(result.action).toBe('no_change');
+    });
+
+    it('should return no_change when local timestamp differs but content is identical', () => {
+      const syncedAt = '2026-01-01T00:00:00.000Z';
+      const localTimestamp = '2026-01-01T01:00:00.000Z';
+      const local: any = {
+        type: 'fact',
+        title: 'Test entry',
+        content: 'Same content',
+        tags: ['a'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        content_updated_at: localTimestamp, // newer than synced_at
+        synced_at: syncedAt,
+      };
+      const remote: any = {
+        type: 'fact',
+        title: 'Test entry',
+        content: 'Same content',
+        tags: ['a'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        updated_at: syncedAt,
+      };
+
+      const result = detectConflict(local, remote);
+      // local content_updated_at > synced_at so localChanged=true, but content
+      // is identical → should be no_change, not local_wins
+      expect(result.action).toBe('no_change');
+    });
+
+    it('should still return remote_wins when content actually differs', () => {
+      const syncedAt = '2026-01-01T00:00:00.000Z';
+      const local: any = {
+        type: 'fact',
+        title: 'Old title',
+        content: 'Old content',
+        tags: '[]',
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        content_updated_at: syncedAt,
+        synced_at: syncedAt,
+      };
+      const remote: any = {
+        type: 'fact',
+        title: 'New title',
+        content: 'New content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        updated_at: '2026-01-01T02:00:00.000Z',
+      };
+
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('remote_wins');
     });
   });
 
