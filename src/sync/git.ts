@@ -1,17 +1,21 @@
 /**
  * Git operations for sync repos.
  *
- * Wrappers around git CLI commands. All operations are synchronous and blocking.
- * Failures are logged to stderr but generally non-fatal (except where noted).
+ * Wrappers around git CLI commands. Local-only operations (init, commit, etc.)
+ * are synchronous. Network operations (pull, push) are async to avoid blocking
+ * the event loop during remote I/O.
  *
- * SECURITY: All commands use execFileSync (not execSync) to avoid shell
- * interpretation of arguments. This prevents command injection via entry
+ * SECURITY: All commands use execFile/execFileSync (not execSync) to avoid
+ * shell interpretation of arguments. This prevents command injection via entry
  * titles, remote URLs, or any other interpolated values.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+const execFileAsync = promisify(execFile);
 
 /** Check if a directory is a git repository. */
 export function isGitRepo(path: string): boolean {
@@ -111,13 +115,13 @@ function hasLocalCommits(path: string): boolean {
 }
 
 /** Pull changes from remote. Skips if no remote or if remote is empty. */
-export function gitPull(path: string, remote = 'origin'): boolean {
+export async function gitPull(path: string, remote = 'origin'): Promise<boolean> {
   if (!hasRemote(path, remote)) return false;
 
   try {
     // Fetch first to ensure we know about remote branches
     try {
-      execFileSync('git', ['fetch', remote], { cwd: path, stdio: 'ignore' });
+      await execFileAsync('git', ['fetch', remote], { cwd: path });
     } catch {
       // Fetch might fail if repo is empty or no network
       return false;
@@ -126,10 +130,11 @@ export function gitPull(path: string, remote = 'origin'): boolean {
     // Check if the remote has any branches — skip pull on empty repos
     let remoteBranch: string;
     try {
-      const refs = execFileSync('git', ['ls-remote', '--heads', remote], {
+      const { stdout } = await execFileAsync('git', ['ls-remote', '--heads', remote], {
         cwd: path,
         encoding: 'utf-8',
-      }).trim();
+      });
+      const refs = stdout.trim();
       if (!refs) {
         // Remote has no branches yet (empty repo) — nothing to pull
         return false;
@@ -147,10 +152,9 @@ export function gitPull(path: string, remote = 'origin'): boolean {
       // instead of pull, which would fail on untracked file conflicts.
       try {
         // Clean up any untracked files that might conflict
-        execFileSync('git', ['clean', '-fd'], { cwd: path, stdio: 'pipe' });
-        execFileSync('git', ['checkout', '-B', remoteBranch, `${remote}/${remoteBranch}`], {
+        await execFileAsync('git', ['clean', '-fd'], { cwd: path });
+        await execFileAsync('git', ['checkout', '-B', remoteBranch, `${remote}/${remoteBranch}`], {
           cwd: path,
-          stdio: 'pipe',
         });
       } catch (checkoutError) {
         console.error(`Git checkout from remote failed for ${path}:`, checkoutError);
@@ -161,10 +165,10 @@ export function gitPull(path: string, remote = 'origin'): boolean {
       // to handle the case where both sides created independent root commits
       // (e.g., both agents cloned an empty remote and committed independently).
       try {
-        execFileSync(
+        await execFileAsync(
           'git',
           ['pull', '--no-rebase', '--allow-unrelated-histories', remote, remoteBranch],
-          { cwd: path, stdio: 'pipe' },
+          { cwd: path },
         );
       } catch {
         // Pull failed — likely a merge conflict. For knowledge sync, we resolve
@@ -177,9 +181,9 @@ export function gitPull(path: string, remote = 'origin'): boolean {
           execFileSync('git', ['rev-parse', 'MERGE_HEAD'], { cwd: path, stdio: 'ignore' });
 
           // Accept "theirs" (remote) for all conflicting files
-          execFileSync('git', ['checkout', '--theirs', '.'], { cwd: path, stdio: 'pipe' });
-          execFileSync('git', ['add', '-A'], { cwd: path, stdio: 'pipe' });
-          execFileSync('git', ['commit', '--no-edit'], { cwd: path, stdio: 'pipe' });
+          await execFileAsync('git', ['checkout', '--theirs', '.'], { cwd: path });
+          await execFileAsync('git', ['add', '-A'], { cwd: path });
+          await execFileAsync('git', ['commit', '--no-edit'], { cwd: path });
         } catch (mergeError) {
           // If we can't resolve, abort the merge to leave repo in clean state
           try {
@@ -259,21 +263,22 @@ export function gitShowFile(repoPath: string, commitHash: string, relativeFilePa
 }
 
 /** Push changes to remote. Skips if no remote. */
-export function gitPush(path: string, remote = 'origin'): boolean {
+export async function gitPush(path: string, remote = 'origin'): Promise<boolean> {
   if (!hasRemote(path, remote)) return false;
 
   try {
     // Try simple push first
     try {
-      execFileSync('git', ['push', remote], { cwd: path, stdio: 'pipe' });
+      await execFileAsync('git', ['push', remote], { cwd: path });
     } catch {
       // If fails (e.g., first push), try setting upstream
-      const currentBranch = execFileSync('git', ['branch', '--show-current'], {
+      const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
         cwd: path,
         encoding: 'utf-8',
-      }).trim();
+      });
+      const currentBranch = stdout.trim();
       if (currentBranch) {
-        execFileSync('git', ['push', '-u', remote, currentBranch], { cwd: path, stdio: 'pipe' });
+        await execFileAsync('git', ['push', '-u', remote, currentBranch], { cwd: path });
       } else {
         throw new Error('Could not determine current branch');
       }

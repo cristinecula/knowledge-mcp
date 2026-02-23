@@ -174,7 +174,7 @@ async function main(): Promise<void> {
 
       // 3. Pull changes
       console.error(`Pulling ${repo.name}...`);
-      gitPull(repo.path);
+      await gitPull(repo.path);
 
       // 4. Ensure structure
       ensureRepoStructure(repo.path);
@@ -283,7 +283,7 @@ async function main(): Promise<void> {
         // Flush any pending debounced commits before syncing
         flushCommit();
         const pullResult = await pull(config);
-        const pushResult = push(config);
+        const pushResult = await push(config);
         const total = pullResult.new_entries + pullResult.updated + pullResult.deleted +
           pullResult.conflicts + pushResult.new_entries + pushResult.updated + pushResult.deleted;
         if (total > 0) {

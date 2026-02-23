@@ -38,7 +38,7 @@ export interface PushResult {
 /**
  * Push local entries to the sync repo.
  */
-export function push(config: import('./routing.js').SyncConfig): PushResult {
+export async function push(config: import('./routing.js').SyncConfig): Promise<PushResult> {
   const result: PushResult = {
     new_entries: 0,
     updated: 0,
@@ -226,8 +226,8 @@ export function push(config: import('./routing.js').SyncConfig): PushResult {
       gitCommitAll(repo.path, 'knowledge: sync push');
     }
 
-    // Always push — there may be unpushed write-through commits
-    gitPush(repo.path);
+    // Always push — there may be unpushed write-through commits (async — doesn't block)
+    await gitPush(repo.path);
   }
 
   return result;

@@ -77,8 +77,8 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
   for (const repo of config.repos) {
     if (!existsSync(repo.path)) continue;
 
-    // Pull remote changes
-    gitPull(repo.path);
+    // Pull remote changes (async — doesn't block the event loop)
+    await gitPull(repo.path);
 
     ensureRepoStructure(repo.path);
 

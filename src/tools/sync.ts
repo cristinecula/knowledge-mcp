@@ -83,7 +83,7 @@ export function registerSyncTool(server: McpServer): void {
           }
 
           if (dir === 'push' || dir === 'both') {
-            const pushResult = push(config);
+            const pushResult = await push(config);
             result.pushed = {
               new: pushResult.new_entries,
               updated: pushResult.updated,

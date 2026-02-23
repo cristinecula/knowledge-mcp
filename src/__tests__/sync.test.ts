@@ -355,18 +355,18 @@ describe('sync layer', () => {
   });
 
   describe('push', () => {
-    it('should export all local entries to repo', () => {
+    it('should export all local entries to repo', async () => {
       insertKnowledge({ title: 'A', type: 'fact', content: '' });
       insertKnowledge({ title: 'B', type: 'decision', content: '' });
 
-      const result = push(config);
+      const result = await push(config);
       expect(result.new_entries).toBe(2);
 
       const files = getAllEntries(); // Just checking we have 2
       expect(files.length).toBe(2);
     });
 
-    it('should route entries to correct repos during push', () => {
+    it('should route entries to correct repos during push', async () => {
       // Setup multi-repo config
       const multiConfig: SyncConfig = {
         repos: [
@@ -378,7 +378,7 @@ describe('sync layer', () => {
       const e1 = insertKnowledge({ title: 'Company', type: 'fact', content: '', scope: 'company' });
       const e2 = insertKnowledge({ title: 'Project', type: 'fact', content: '', scope: 'project' });
 
-      const result = push(multiConfig);
+      const result = await push(multiConfig);
       expect(result.new_entries).toBe(2);
 
       // Check files in correct repos
@@ -857,7 +857,7 @@ describe('sync layer', () => {
       });
 
       // Push to sync everything — this sets synced_at on links
-      push(config);
+      await push(config);
 
       // Verify link exists locally and has synced_at set
       let links = getAllLinks();
@@ -883,7 +883,7 @@ describe('sync layer', () => {
       // Create entries and push them to establish sync baseline
       const e1 = insertKnowledge({ title: 'E1', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'E2', type: 'fact', content: '' });
-      push(config);
+      await push(config);
 
       // Now create a link locally (NOT pushed — synced_at should be null)
       const link = insertLink({
@@ -910,7 +910,7 @@ describe('sync layer', () => {
   });
 
   describe('push with links', () => {
-    it('should export links to repo', () => {
+    it('should export links to repo', async () => {
       const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
       insertLink({
@@ -921,7 +921,7 @@ describe('sync layer', () => {
         source: 'user',
       });
 
-      const result = push(config);
+      const result = await push(config);
       expect(result.new_links).toBe(1);
 
       // Verify link file exists
@@ -929,7 +929,7 @@ describe('sync layer', () => {
       expect(linkIds.size).toBe(1);
     });
 
-    it('should set synced_at on links after push', () => {
+    it('should set synced_at on links after push', async () => {
       const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
       const link = insertLink({
@@ -943,14 +943,14 @@ describe('sync layer', () => {
       let links = getAllLinks();
       expect(links.find((l) => l.id === link.id)!.synced_at).toBeNull();
 
-      push(config);
+      await push(config);
 
       // After push — synced_at should be set
       links = getAllLinks();
       expect(links.find((l) => l.id === link.id)!.synced_at).toBeTruthy();
     });
 
-    it('should clean up deleted links during push', () => {
+    it('should clean up deleted links during push', async () => {
       const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
       const link = insertLink({
@@ -961,19 +961,19 @@ describe('sync layer', () => {
       });
 
       // First push — creates the link file
-      push(config);
+      await push(config);
       expect(getRepoLinkIds(repoPath).has(link.id)).toBe(true);
 
       // Delete the link locally
       deleteLink(link.id);
 
       // Second push — should remove the link file
-      const result = push(config);
+      const result = await push(config);
       expect(result.deleted_links).toBe(1);
       expect(getRepoLinkIds(repoPath).has(link.id)).toBe(false);
     });
 
-    it('should not push conflict-related links', () => {
+    it('should not push conflict-related links', async () => {
       const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
 
@@ -986,16 +986,16 @@ describe('sync layer', () => {
         source: 'sync:conflict',
       });
 
-      const result = push(config);
+      const result = await push(config);
       // Should push entries but not the conflict link
       expect(result.new_links).toBe(0);
     });
 
-    it('should not push [Sync Conflict] entries', () => {
+    it('should not push [Sync Conflict] entries', async () => {
       insertKnowledge({ title: '[Sync Conflict] Remote Version', type: 'fact', content: 'conflict' });
       insertKnowledge({ title: 'Normal Entry', type: 'fact', content: 'normal' });
 
-      const result = push(config);
+      const result = await push(config);
       expect(result.new_entries).toBe(1); // Only the normal one
     });
   });
@@ -1540,7 +1540,7 @@ describe('sync layer', () => {
       expect(pullResult.new_entries).toBe(1);
 
       // 3. Push — should write byte-identical JSON
-      push(config);
+      await push(config);
 
       // 4. Read the file back and compare
       const fileContent = readEntryFileRaw(repoPath, 'fact', remoteId);
@@ -1550,7 +1550,7 @@ describe('sync layer', () => {
   });
 
   describe('push skip for unchanged entries', () => {
-    it('should not write file when entry JSON is byte-identical', () => {
+    it('should not write file when entry JSON is byte-identical', async () => {
       insertKnowledge({
         type: 'fact',
         title: 'Stable entry',
@@ -1558,21 +1558,21 @@ describe('sync layer', () => {
       });
 
       // First push — creates the file
-      const result1 = push(config);
+      const result1 = await push(config);
       expect(result1.new_entries).toBe(1);
 
       // Commit the initial push
       gitCommitAll(repoPath, 'initial push');
 
       // Second push — file should be skipped (no write, no git change)
-      push(config);
+      await push(config);
 
       // gitCommitAll returns false when there's nothing to commit
       const committed = gitCommitAll(repoPath, 'second push');
       expect(committed).toBe(false);
     });
 
-    it('should write file when entry content changes between pushes', () => {
+    it('should write file when entry content changes between pushes', async () => {
       const entry = insertKnowledge({
         type: 'fact',
         title: 'Changing entry',
@@ -1580,14 +1580,14 @@ describe('sync layer', () => {
       });
 
       // First push
-      push(config);
+      await push(config);
       gitCommitAll(repoPath, 'initial push');
 
       // Modify the entry
       updateKnowledgeFields(entry.id, { content: 'Updated content' });
 
       // Second push — push() commits internally, so we verify via file content
-      push(config);
+      await push(config);
 
       // Verify file has new content
       const fileContent = readEntryFileRaw(repoPath, 'fact', entry.id);
