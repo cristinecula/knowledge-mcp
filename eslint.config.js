@@ -2,7 +2,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['build/', 'node_modules/'],
+    ignores: ['build/', 'node_modules/', 'src/graph/wiki/', 'src/graph/static/wiki-app.js'],
   },
   ...tseslint.configs.recommended,
   {

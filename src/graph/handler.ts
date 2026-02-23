@@ -447,23 +447,24 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     return;
   }
 
-  if (pathname === '/wiki' || pathname === '/wiki.html') {
-    serveStatic(res, resolve(STATIC_DIR, 'wiki.html'));
-    return;
-  }
-
   if (pathname === '/graph.js') {
     serveStatic(res, resolve(STATIC_DIR, 'graph.js'));
     return;
   }
 
-  if (pathname === '/wiki.js') {
-    serveStatic(res, resolve(STATIC_DIR, 'wiki.js'));
+  if (pathname === '/wiki-app.js') {
+    serveStatic(res, resolve(STATIC_DIR, 'wiki-app.js'));
     return;
   }
 
   if (pathname === '/style.css') {
     serveStatic(res, resolve(STATIC_DIR, 'style.css'));
+    return;
+  }
+
+  // SPA catch-all: any /wiki* path (except /api/wiki*) serves the wiki shell
+  if (pathname === '/wiki' || pathname.startsWith('/wiki/')) {
+    serveStatic(res, resolve(STATIC_DIR, 'wiki.html'));
     return;
   }
 
