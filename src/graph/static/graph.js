@@ -54,6 +54,7 @@ const statsEl = document.getElementById('stats');
 // Filters
 const filterType = document.getElementById('filter-type');
 const filterScope = document.getElementById('filter-scope');
+const filterProject = document.getElementById('filter-project');
 const filterStatus = document.getElementById('filter-status');
 const filterSearch = document.getElementById('filter-search');
 const btnRefresh = document.getElementById('btn-refresh');
@@ -114,6 +115,7 @@ async function fetchEntryDetail(id) {
 function applyFilters(data) {
   const typeFilter = filterType.value;
   const scopeFilter = filterScope.value;
+  const projectFilter = filterProject.value;
   const statusFilter = filterStatus.value;
 
   let nodes = data.nodes;
@@ -123,6 +125,9 @@ function applyFilters(data) {
   }
   if (scopeFilter) {
     nodes = nodes.filter(n => n.scope === scopeFilter);
+  }
+  if (projectFilter) {
+    nodes = nodes.filter(n => (n.project || '') === projectFilter);
   }
   if (statusFilter && statusFilter !== 'all') {
     nodes = nodes.filter(n => n.status === statusFilter);
@@ -404,14 +409,38 @@ document.getElementById('sidebar-close').addEventListener('click', () => {
     .attr('stroke-width', d => d.status === 'needs_revalidation' ? 3 : 0);
 });
 
+// Populate the project filter dropdown from the current graph data
+function populateProjectFilter(data) {
+  const projects = [...new Set(
+    data.nodes
+      .map(n => n.project || '')
+      .filter(p => p.length > 0)
+  )].sort((a, b) => a.localeCompare(b));
+
+  const current = filterProject.value;
+  filterProject.innerHTML = '<option value="">All Projects</option>';
+  for (const p of projects) {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p;
+    filterProject.appendChild(opt);
+  }
+  // Restore selection if it still exists
+  if (projects.includes(current)) {
+    filterProject.value = current;
+  }
+}
+
 // Filter changes
 filterType.addEventListener('change', () => render(graphData));
 filterScope.addEventListener('change', () => render(graphData));
+filterProject.addEventListener('change', () => render(graphData));
 filterStatus.addEventListener('change', () => render(graphData));
 
 // Refresh button
 btnRefresh.addEventListener('click', async () => {
   graphData = await fetchGraphData();
+  populateProjectFilter(graphData);
   render(graphData);
 });
 
@@ -564,5 +593,6 @@ window.addEventListener('resize', () => {
 // Initial load
 (async () => {
   graphData = await fetchGraphData();
+  populateProjectFilter(graphData);
   render(graphData);
 })();
