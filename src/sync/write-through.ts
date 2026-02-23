@@ -17,7 +17,7 @@ import {
   ensureRepoStructure,
 } from './fs.js';
 import { resolveRepoForScope } from './routing.js';
-import type { KnowledgeEntry, KnowledgeLink, KnowledgeType } from '../types.js';
+import type { KnowledgeEntry, KnowledgeLink, KnowledgeType, Scope } from '../types.js';
 
 /**
  * Track which repos have pending changes that need a git commit.
@@ -57,7 +57,7 @@ export function syncWriteEntry(
 
     // 2. Check if moved from another repo (scope/project changed)
     if (oldScope && oldProject !== undefined) {
-      const oldRepo = resolveRepoForScope(oldScope as any, oldProject, config);
+      const oldRepo = resolveRepoForScope(oldScope as Scope, oldProject, config);
       if (oldRepo.path !== repoPath) {
         // Entry moved between repos — delete from old repo
         deleteEntryFile(oldRepo.path, entry.id, oldType);
@@ -124,7 +124,7 @@ export function syncDeleteEntry(id: string, type?: KnowledgeType): void {
       // But we can check existence first if we cared. deleteEntryFile handles "not found" gracefully.
       deleteEntryFile(repo.path, id, type);
       touchedRepos.add(repo.path);
-    } catch (error) {
+    } catch {
       // Ignore errors (e.g., file not found in this repo)
     }
   }
@@ -143,7 +143,7 @@ export function syncDeleteLink(id: string): void {
     try {
       deleteLinkFile(repo.path, id);
       touchedRepos.add(repo.path);
-    } catch (error) {
+    } catch {
       // Ignore errors
     }
   }

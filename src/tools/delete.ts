@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { deleteKnowledge } from '../db/queries.js';
-import { syncDeleteEntry, syncDeleteLink, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
+import { syncDeleteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
 import { getKnowledgeById } from '../db/queries.js';
 import type { KnowledgeType } from '../types.js';
 

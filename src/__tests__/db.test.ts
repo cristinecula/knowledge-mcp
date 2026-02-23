@@ -18,7 +18,6 @@ import {
   getIncomingLinks,
   getLinkedEntries,
   deleteLink,
-  getAllLinks,
   deleteKnowledge,
   storeEmbedding,
   getEmbedding,
@@ -365,7 +364,7 @@ describe('getAllActiveEntries', () => {
   it('should return active and needs_revalidation entries', () => {
     const a = insertKnowledge({ type: 'fact', title: 'A', content: 'a' });
     const b = insertKnowledge({ type: 'fact', title: 'B', content: 'b' });
-    const c = insertKnowledge({ type: 'fact', title: 'C', content: 'c' });
+    insertKnowledge({ type: 'fact', title: 'C', content: 'c' });
 
     updateStatus(a.id, 'deprecated');
     updateStatus(b.id, 'needs_revalidation');

@@ -23,7 +23,6 @@ import {
 } from './fs.js';
 import { resolveRepoForScope } from './routing.js';
 import { gitCommitAll, gitPush } from './git.js';
-import type { KnowledgeEntry, KnowledgeLink } from '../types.js';
 
 export interface PushResult {
   new_entries: number;

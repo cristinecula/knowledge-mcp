@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { deprecateKnowledge, getKnowledgeById } from '../db/queries.js';
+import { deprecateKnowledge } from '../db/queries.js';
 import { syncWriteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
 
 export function registerDeprecateTool(server: McpServer): void {

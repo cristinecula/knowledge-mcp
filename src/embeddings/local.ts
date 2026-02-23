@@ -13,6 +13,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly model: string;
   readonly dimensions = DIMENSIONS;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Dynamic import from @xenova/transformers, type not available statically
   private pipeline: any = null;
 
   constructor(model?: string) {

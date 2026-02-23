@@ -21,7 +21,6 @@ import {
   type KnowledgeType,
   type Scope,
   type Status,
-  type LinkType,
 } from '../types.js';
 
 // UUID v4 pattern (case-insensitive, with hyphens)

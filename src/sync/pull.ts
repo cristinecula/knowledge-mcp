@@ -30,8 +30,6 @@ import { detectConflict } from './merge.js';
 import {
   readAllEntryFiles,
   readAllLinkFiles,
-  getRepoEntryIds,
-  getRepoLinkIds,
   ensureRepoStructure,
 } from './fs.js';
 import { gitPull } from './git.js';

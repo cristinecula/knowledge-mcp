@@ -593,7 +593,7 @@ describe('list_knowledge pagination', () => {
   });
 
   it('should return second page with offset 5', () => {
-    const entries = seedEntries(15);
+    seedEntries(15);
 
     const page1 = listKnowledge({ limit: 5, offset: 0, sortBy: 'created', includeWeak: true });
     const page2 = listKnowledge({ limit: 5, offset: 5, sortBy: 'created', includeWeak: true });

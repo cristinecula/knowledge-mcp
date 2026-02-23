@@ -5,7 +5,6 @@ import {
   updateStatus,
 } from '../db/queries.js';
 import {
-  STRENGTH_ACTIVE_THRESHOLD,
   STRENGTH_DORMANT_THRESHOLD,
   type KnowledgeEntry,
   type KnowledgeLink,

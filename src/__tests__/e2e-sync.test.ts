@@ -623,7 +623,7 @@ describe('e2e sync', { timeout: TEST_TIMEOUT }, () => {
       // Create entries + link
       const e1 = await storeEntry(agentA, { title: 'Link Del Source', content: 'src' });
       const e2 = await storeEntry(agentA, { title: 'Link Del Target', content: 'tgt' });
-      const linkResult = await callTool(agentA, 'link_knowledge', {
+      await callTool(agentA, 'link_knowledge', {
         source_id: e1.id,
         target_id: e2.id,
         link_type: 'related',
@@ -634,7 +634,7 @@ describe('e2e sync', { timeout: TEST_TIMEOUT }, () => {
 
       // Verify Agent B has the link
       let results = await queryEntries(agentB, 'Link Del Source');
-      let source = results.results.find((r) => r.id === e1.id);
+      const source = results.results.find((r) => r.id === e1.id);
       expect((source as any).links.length).toBeGreaterThan(0);
 
       // Agent A deletes the entry that has links (which cascades link deletion)

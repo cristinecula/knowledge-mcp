@@ -16,18 +16,13 @@ import {
   getAllLinks,
   updateKnowledgeFields,
   updateSyncedAt,
-  updateKnowledgeContent,
   deprecateKnowledge,
-  deleteKnowledge,
   deleteLink,
-  importKnowledge,
-  importLink,
 } from '../db/queries.js';
 import {
   entryToJSON,
   parseEntryJSON,
   linkToJSON,
-  parseLinkJSON,
   ensureRepoStructure,
   writeEntryFile,
   writeLinkFile,
@@ -35,7 +30,6 @@ import {
   pull,
   detectConflict,
   setSyncConfig,
-  getSyncConfig,
   syncWriteEntry,
   syncWriteLink,
   syncDeleteEntry,
@@ -45,7 +39,7 @@ import {
   getRepoLinkIds,
 } from '../sync/index.js';
 import { gitInit, gitCommitAll, isGitRepo } from '../sync/git.js';
-import type { EntryJSON, LinkJSON } from '../sync/serialize.js';
+import type { EntryJSON } from '../sync/serialize.js';
 import type { SyncConfig } from '../sync/routing.js';
 
 describe('sync layer', () => {
