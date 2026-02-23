@@ -45,6 +45,11 @@ export function registerUpdateTool(server: McpServer): void {
         });
 
         if (updated) {
+          // Clear needs_revalidation — updating the entry IS the revalidation
+          if (oldEntry && oldEntry.status === 'needs_revalidation') {
+            updateStatus(id, 'active');
+          }
+
           syncWriteEntry(updated, oldEntry?.type, oldEntry?.scope, oldEntry?.project);
           
           for (const repoPath of touchedRepos) {

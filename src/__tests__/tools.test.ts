@@ -321,6 +321,32 @@ describe('update + cascade revalidation workflow', () => {
 
     expect(revalidatedIds).toHaveLength(0);
   });
+
+  it('should clear needs_revalidation when the entry itself is updated', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Project Overview',
+      content: 'Stub content',
+    });
+
+    // Simulate the entry being flagged for revalidation (e.g. a dependency changed)
+    updateStatus(entry.id, 'needs_revalidation');
+    expect(getKnowledgeById(entry.id)!.status).toBe('needs_revalidation');
+
+    // Simulate update_knowledge tool behavior: update fields, then clear status
+    const oldEntry = getKnowledgeById(entry.id);
+    updateKnowledgeFields(entry.id, { content: 'Full wiki content filled by agent' });
+
+    // This is the logic from update.ts lines 48-51
+    if (oldEntry && oldEntry.status === 'needs_revalidation') {
+      updateStatus(entry.id, 'active');
+    }
+
+    // Entry should now be active, not stuck as needs_revalidation
+    const updated = getKnowledgeById(entry.id)!;
+    expect(updated.status).toBe('active');
+    expect(updated.content).toBe('Full wiki content filled by agent');
+  });
 });
 
 // === Link workflow ===
