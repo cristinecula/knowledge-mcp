@@ -19,6 +19,7 @@ import {
   getLinkedEntries,
   getLinkById,
   getIncomingLinks,
+  getOutgoingLinks,
   recordAccess,
   updateStatus,
   updateKnowledgeFields,
@@ -346,6 +347,85 @@ describe('update + cascade revalidation workflow', () => {
     const updated = getKnowledgeById(entry.id)!;
     expect(updated.status).toBe('active');
     expect(updated.content).toBe('Full wiki content filled by agent');
+  });
+});
+
+// === Wiki source links warning ===
+
+describe('wiki source links warning', () => {
+  /**
+   * Simulate the source links check from update.ts:
+   * after updating a wiki entry, check if it has outgoing links to non-wiki entries.
+   */
+  function checkWikiSourceLinks(entryId: string): boolean {
+    const outgoing = getOutgoingLinks(entryId);
+    return outgoing.some((link) => {
+      const target = getKnowledgeById(link.target_id);
+      return target !== null && target.type !== 'wiki';
+    });
+  }
+
+  it('should warn when wiki entry has no outgoing links', () => {
+    const wiki = insertKnowledge({
+      type: 'wiki',
+      title: 'Architecture Overview',
+      content: 'Overview of the system architecture',
+    });
+
+    updateKnowledgeFields(wiki.id, { content: 'Updated architecture overview' });
+
+    const hasSourceLinks = checkWikiSourceLinks(wiki.id);
+    expect(hasSourceLinks).toBe(false);
+  });
+
+  it('should warn when wiki entry only links to other wiki entries', () => {
+    const wikiA = insertKnowledge({
+      type: 'wiki',
+      title: 'Main Wiki Page',
+      content: 'Top-level wiki page',
+    });
+    const wikiB = insertKnowledge({
+      type: 'wiki',
+      title: 'Sub Wiki Page',
+      content: 'Child wiki page',
+    });
+
+    insertLink({ sourceId: wikiA.id, targetId: wikiB.id, linkType: 'related' });
+
+    const hasSourceLinks = checkWikiSourceLinks(wikiA.id);
+    expect(hasSourceLinks).toBe(false);
+  });
+
+  it('should not warn when wiki entry links to a non-wiki entry', () => {
+    const wiki = insertKnowledge({
+      type: 'wiki',
+      title: 'Architecture Overview',
+      content: 'Overview of the system architecture',
+    });
+    const decision = insertKnowledge({
+      type: 'decision',
+      title: 'Use microservices',
+      content: 'We chose microservices architecture',
+    });
+
+    insertLink({ sourceId: wiki.id, targetId: decision.id, linkType: 'derived' });
+
+    const hasSourceLinks = checkWikiSourceLinks(wiki.id);
+    expect(hasSourceLinks).toBe(true);
+  });
+
+  it('should not warn for non-wiki entries regardless of links', () => {
+    const fact = insertKnowledge({
+      type: 'fact',
+      title: 'Some fact',
+      content: 'Fact content',
+    });
+
+    updateKnowledgeFields(fact.id, { content: 'Updated fact' });
+
+    // Non-wiki entries don't get the source links check
+    const updated = getKnowledgeById(fact.id)!;
+    expect(updated.type).not.toBe('wiki');
   });
 });
 

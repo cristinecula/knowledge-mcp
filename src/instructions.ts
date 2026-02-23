@@ -40,6 +40,14 @@ accessed stays strong; unused knowledge naturally fades.
 - If an entry needs updating rather than deprecating, use \`update_knowledge\`.
 - Use \`delete_knowledge\` only for entries created by mistake.
 
+## Wiki entries
+
+- Wiki entries (\`type: "wiki"\`) are curated documentation pages that are exempt from memory decay.
+- When creating or updating wiki entries, you **must** link them to the source knowledge entries
+  they are derived from using \`link_knowledge\` (e.g., \`derived\`, \`elaborates\`, or \`related\` link types).
+- The \`update_knowledge\` tool will warn you if a wiki entry has no outgoing links to non-wiki entries.
+  Always resolve these warnings before considering the task complete.
+
 ## Understanding entry history
 
 When git sync is configured, you can inspect how entries evolved over time:

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, updateStatus } from '../db/queries.js';
+import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, getOutgoingLinks, updateStatus } from '../db/queries.js';
 import { syncWriteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, SCOPES, REVALIDATION_LINK_TYPES } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
@@ -80,6 +80,22 @@ export function registerUpdateTool(server: McpServer): void {
           let responseText = `Updated knowledge entry: ${updated.title} (ID: ${id})`;
           if (revalidated.length > 0) {
             responseText += `\n\nCascade revalidation: flagged ${revalidated.length} linked entries as needs_revalidation:\n${revalidated.map((rid) => `  - ${rid}`).join('\n')}`;
+          }
+
+          // Warn if a wiki entry has no outgoing links to non-wiki knowledge entries
+          if (updated.type === 'wiki') {
+            const outgoing = getOutgoingLinks(id);
+            const hasSourceLink = outgoing.some((link) => {
+              const target = getKnowledgeById(link.target_id);
+              return target !== null && target.type !== 'wiki';
+            });
+            if (!hasSourceLink) {
+              responseText +=
+                '\n\n⚠ WARNING: This wiki entry has no links to source knowledge entries. ' +
+                'Wiki pages should reference the knowledge entries they are derived from. ' +
+                'Use link_knowledge to create links (e.g., "derived", "elaborates", or "related") ' +
+                'from this wiki entry to the relevant source entries.';
+            }
           }
 
           return {
