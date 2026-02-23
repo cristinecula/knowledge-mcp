@@ -96,7 +96,31 @@ during the initialization handshake. Compatible clients (Claude Code, OpenCode,
 etc.) automatically inject these into the agent's system prompt, telling it to
 query, store, and maintain knowledge during sessions. No manual setup is needed.
 
-If you want to add project-specific guidance on top, you can still create an
+However, the built-in instructions describe *how* to use the tools — agents
+also benefit from a top-level nudge that tells them *when* to use them. We
+recommend adding the following to your global rules file
+(`~/.config/opencode/AGENTS.md` for OpenCode, `~/.claude/CLAUDE.md` for Claude
+Code):
+
+~~~markdown
+## Knowledge Base
+
+A persistent knowledge base is available via the `knowledge_*` MCP tools. Use it for non-trivial tasks (multi-step work, debugging, feature implementation -- not quick one-off questions).
+
+### Session Start
+- Query the knowledge base for entries relevant to the current project or task before diving into work. This avoids re-discovering things learned in previous sessions.
+
+### During Work
+- Store non-obvious discoveries: architectural decisions, conventions, debugging insights, gotchas, and patterns that would save time if known in a future session.
+- Link new entries to related existing knowledge.
+- Reinforce entries you verify are still accurate.
+- Deprecate or update entries that are outdated.
+
+### After Completing Tasks
+- If the task involved significant findings or decisions worth remembering, store them before finishing.
+~~~
+
+If you want to add project-specific guidance on top, you can create an
 `AGENTS.md` (OpenCode) or `CLAUDE.md` (Claude Code) in your project root.
 
 ## Configuration
