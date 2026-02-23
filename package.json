@@ -7,7 +7,7 @@
     "knowledge-mcp": "./build/index.js"
   },
   "scripts": {
-    "build": "tsc && cp -r src/graph/static build/graph/static && chmod 755 build/index.js",
+    "build": "tsc && rm -rf build/graph/static && cp -r src/graph/static build/graph/static && chmod 755 build/index.js",
     "start": "node build/index.js",
     "dev": "tsc --watch",
     "test": "vitest run",
