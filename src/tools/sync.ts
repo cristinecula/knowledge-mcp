@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getSyncConfig, isSyncEnabled, isSyncInProgress, setSyncInProgress, tryAcquireSyncLock, releaseSyncLock, pull, push } from '../sync/index.js';
+import { getSyncConfig, isSyncEnabled, isSyncInProgress, setSyncInProgress, tryAcquireSyncLock, releaseSyncLock, pull, push, flushCommit } from '../sync/index.js';
 
 export function registerSyncTool(server: McpServer): void {
   server.registerTool(
@@ -61,6 +61,8 @@ export function registerSyncTool(server: McpServer): void {
 
         setSyncInProgress(true);
         try {
+          // Flush any pending debounced commits before pulling/pushing
+          flushCommit();
           const config = getSyncConfig()!;
           const dir = direction ?? 'both';
           const result: Record<string, unknown> = { direction: dir };

@@ -16,6 +16,7 @@ export type { PullResult, ConflictDetail } from './pull.js';
 export { push } from './push.js';
 export type { PushResult } from './push.js';
 export { syncWriteEntry, syncWriteLink, syncDeleteEntry, syncDeleteLink, touchedRepos, clearTouchedRepos } from './write-through.js';
+export { scheduleCommit, flushCommit, hasPendingCommit, COMMIT_DEBOUNCE_MS } from './commit-scheduler.js';
 export {
   ensureRepoStructure,
   writeEntryFile,

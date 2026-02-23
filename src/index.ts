@@ -33,6 +33,7 @@ import {
   releaseSyncLock,
   pull,
   push,
+  flushCommit,
   loadSyncConfig,
   ensureRepoStructure,
   gitInit,
@@ -279,6 +280,8 @@ async function main(): Promise<void> {
       if (!tryAcquireSyncLock()) return;     // cross-process coordinator lock
       setSyncInProgress(true);
       try {
+        // Flush any pending debounced commits before syncing
+        flushCommit();
         const pullResult = await pull(config);
         const pushResult = push(config);
         const total = pullResult.new_entries + pullResult.updated + pullResult.deleted +
@@ -304,6 +307,8 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     clearInterval(maintenanceInterval);
     if (syncInterval) clearInterval(syncInterval);
+    // Flush any pending debounced commits before shutting down
+    flushCommit();
     await stopGraphServer();
     closeDb();
     process.exit(0);

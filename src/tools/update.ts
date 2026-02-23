@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, getOutgoingLinks, updateStatus } from '../db/queries.js';
-import { syncWriteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
+import { syncWriteEntry, scheduleCommit } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, SCOPES, REVALIDATION_LINK_TYPES } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
 
@@ -52,10 +52,8 @@ export function registerUpdateTool(server: McpServer): void {
 
           syncWriteEntry(updated, oldEntry?.type, oldEntry?.scope, oldEntry?.project);
           
-          for (const repoPath of touchedRepos) {
-            gitCommitAll(repoPath, `knowledge: update ${updated.type} "${updated.title}"`);
-          }
-          clearTouchedRepos();
+          // Schedule a debounced git commit
+          scheduleCommit(`knowledge: update ${updated.type} "${updated.title}"`);
 
           // Regenerate embedding if content-affecting fields changed (non-fatal)
           if (title !== undefined || content !== undefined || tags !== undefined) {

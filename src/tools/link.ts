@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { insertLink, getKnowledgeById } from '../db/queries.js';
-import { syncWriteLink, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
+import { syncWriteLink, scheduleCommit } from '../sync/index.js';
 import type { LinkType } from '../types.js';
 
 export function registerLinkTool(server: McpServer): void {
@@ -72,13 +72,10 @@ export function registerLinkTool(server: McpServer): void {
           syncWriteLink(reverseLink, targetEntry);
         }
 
-        // Commit all changes
-        for (const repoPath of touchedRepos) {
-          let msg = `knowledge: link ${link_type} "${sourceEntry.title}" -> "${targetEntry.title}"`;
-          if (reverseLink) msg += ` (bidirectional)`;
-          gitCommitAll(repoPath, msg);
-        }
-        clearTouchedRepos();
+        // Schedule a debounced git commit
+        let msg = `knowledge: link ${link_type} "${sourceEntry.title}" -> "${targetEntry.title}"`;
+        if (reverseLink) msg += ` (bidirectional)`;
+        scheduleCommit(msg);
 
         return {
           content: [

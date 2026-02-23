@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { deprecateKnowledge } from '../db/queries.js';
-import { syncWriteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
+import { syncWriteEntry, scheduleCommit } from '../sync/index.js';
 
 export function registerDeprecateTool(server: McpServer): void {
   server.registerTool(
@@ -23,10 +23,8 @@ export function registerDeprecateTool(server: McpServer): void {
         if (deprecated) {
           syncWriteEntry(deprecated);
           
-          for (const repoPath of touchedRepos) {
-            gitCommitAll(repoPath, `knowledge: deprecate ${deprecated.type} "${deprecated.title}"`);
-          }
-          clearTouchedRepos();
+          // Schedule a debounced git commit
+          scheduleCommit(`knowledge: deprecate ${deprecated.type} "${deprecated.title}"`);
 
           return {
             content: [

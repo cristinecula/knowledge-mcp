@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { insertKnowledge, insertLink } from '../db/queries.js';
-import { syncWriteEntry, syncWriteLink, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
+import { syncWriteEntry, syncWriteLink, scheduleCommit } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, LINK_TYPES, SCOPES } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
 
@@ -74,11 +74,8 @@ export function registerStoreTool(server: McpServer): void {
           }
         }
 
-        // Commit all changes
-        for (const repoPath of touchedRepos) {
-          gitCommitAll(repoPath, `knowledge: store ${entry.type} "${entry.title}"` + (links ? ` with ${links.length} links` : ''));
-        }
-        clearTouchedRepos();
+        // Schedule a debounced git commit
+        scheduleCommit(`knowledge: store ${entry.type} "${entry.title}"` + (links ? ` with ${links.length} links` : ''));
 
         return {
           content: [

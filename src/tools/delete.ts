@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { deleteKnowledge } from '../db/queries.js';
-import { syncDeleteEntry, touchedRepos, gitCommitAll, clearTouchedRepos } from '../sync/index.js';
+import { syncDeleteEntry, scheduleCommit } from '../sync/index.js';
 import { getKnowledgeById } from '../db/queries.js';
 import type { KnowledgeType } from '../types.js';
 
@@ -25,10 +25,8 @@ export function registerDeleteTool(server: McpServer): void {
         if (deleted) {
           syncDeleteEntry(id, entry?.type as KnowledgeType);
           
-          for (const repoPath of touchedRepos) {
-            gitCommitAll(repoPath, `knowledge: delete ${entry?.type || 'entry'} "${entry?.title || id}"`);
-          }
-          clearTouchedRepos();
+          // Schedule a debounced git commit
+          scheduleCommit(`knowledge: delete ${entry?.type || 'entry'} "${entry?.title || id}"`);
 
           return {
             content: [{ type: 'text', text: `Deleted knowledge entry: ${id}` }],
