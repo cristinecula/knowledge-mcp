@@ -2,36 +2,63 @@
 
 import { component, html, useState, useEffect } from '@pionjs/pion';
 import { navigate } from '@neovici/cosmoz-router';
-import { fetchEntry, updateWikiEntry, type WikiEntry } from '../api.js';
+import {
+  fetchEntry,
+  fetchWikiEntries,
+  updateWikiEntry,
+  type WikiEntry,
+} from '../api.js';
 import { slugify } from '../util.js';
+
+/** Collect all descendant IDs of a given entry to prevent cycle in parent selection. */
+function getDescendantIds(entryId: string, entries: WikiEntry[]): Set<string> {
+  const ids = new Set<string>();
+  const queue = [entryId];
+  while (queue.length > 0) {
+    const current = queue.pop()!;
+    for (const e of entries) {
+      if (e.parent_page_id === current && !ids.has(e.id)) {
+        ids.add(e.id);
+        queue.push(e.id);
+      }
+    }
+  }
+  return ids;
+}
 
 function WikiEdit(this: HTMLElement & { entryId: string }) {
   const entryId = this.entryId;
   const [entry, setEntry] = useState<WikiEntry | null>(null);
+  const [allEntries, setAllEntries] = useState<WikiEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [declaration, setDeclaration] = useState('');
   const [tags, setTags] = useState('');
   const [project, setProject] = useState('');
   const [scope, setScope] = useState('company');
+  const [parentPageId, setParentPageId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!entryId) return;
     let cancelled = false;
-    fetchEntry(entryId).then((data) => {
-      if (cancelled) return;
-      if (data && data.entry) {
-        const e = data.entry;
-        setEntry(e);
-        setTitle(e.title);
-        setDeclaration(e.declaration || '');
-        setTags((e.tags || []).join(', '));
-        setProject(e.project || '');
-        setScope(e.scope);
-      }
-      setLoading(false);
-    });
+    Promise.all([fetchEntry(entryId), fetchWikiEntries()]).then(
+      ([data, entries]) => {
+        if (cancelled) return;
+        if (data && data.entry) {
+          const e = data.entry;
+          setEntry(e);
+          setTitle(e.title);
+          setDeclaration(e.declaration || '');
+          setTags((e.tags || []).join(', '));
+          setProject(e.project || '');
+          setScope(e.scope);
+          setParentPageId(e.parent_page_id);
+          setAllEntries(entries);
+        }
+        setLoading(false);
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -44,6 +71,11 @@ function WikiEdit(this: HTMLElement & { entryId: string }) {
   if (!entry) {
     return html`<div class="wiki-empty">Entry not found</div>`;
   }
+
+  // Exclude self + all descendants from parent options to prevent cycles
+  const excludedIds = getDescendantIds(entry.id, allEntries);
+  excludedIds.add(entry.id);
+  const parentOptions = allEntries.filter((e) => !excludedIds.has(e.id));
 
   const handleSave = async () => {
     const trimmedTitle = title.trim();
@@ -61,6 +93,7 @@ function WikiEdit(this: HTMLElement & { entryId: string }) {
         .filter(Boolean),
       project: project.trim() || null,
       scope,
+      parentPageId,
     });
     if (result.entry) {
       navigate(
@@ -97,6 +130,31 @@ function WikiEdit(this: HTMLElement & { entryId: string }) {
         ></textarea>
         <div class="wiki-form-hint">
           Updating the declaration will re-mark this page for agent processing.
+        </div>
+      </div>
+
+      <div class="wiki-form-group">
+        <label>Parent Page</label>
+        <select
+          @change=${(e: Event) => {
+            const val = (e.target as HTMLSelectElement).value;
+            setParentPageId(val || null);
+          }}
+        >
+          <option value="">None (top-level)</option>
+          ${parentOptions.map(
+            (opt) =>
+              html`<option
+                value=${opt.id}
+                ?selected=${opt.id === parentPageId}
+              >
+                ${opt.title}
+              </option>`,
+          )}
+        </select>
+        <div class="wiki-form-hint">
+          Move this page under another wiki page. Cannot select itself or
+          descendants.
         </div>
       </div>
 

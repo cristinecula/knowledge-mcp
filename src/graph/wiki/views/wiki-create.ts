@@ -1,8 +1,8 @@
 // <wiki-create> — form to create a new wiki page
 
-import { component, html, useState } from '@pionjs/pion';
+import { component, html, useState, useEffect } from '@pionjs/pion';
 import { navigate } from '@neovici/cosmoz-router';
-import { createWikiEntry } from '../api.js';
+import { createWikiEntry, fetchWikiEntries, type WikiEntry } from '../api.js';
 import { slugify } from '../util.js';
 
 function WikiCreate() {
@@ -11,7 +11,19 @@ function WikiCreate() {
   const [tags, setTags] = useState('');
   const [project, setProject] = useState('');
   const [scope, setScope] = useState('company');
+  const [parentPageId, setParentPageId] = useState<string | null>(null);
+  const [allEntries, setAllEntries] = useState<WikiEntry[]>([]);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWikiEntries().then((entries) => {
+      if (!cancelled) setAllEntries(entries);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSave = async () => {
     const trimmedTitle = title.trim();
@@ -29,6 +41,7 @@ function WikiCreate() {
         .filter(Boolean),
       project: project.trim() || null,
       scope,
+      parentPageId,
     });
     if (result.entry) {
       navigate(`/wiki/${result.entry.id}/${slugify(result.entry.title)}`, null, {
@@ -65,6 +78,25 @@ function WikiCreate() {
         ></textarea>
         <div class="wiki-form-hint">
           This prompt tells agents what content to produce for this page.
+        </div>
+      </div>
+
+      <div class="wiki-form-group">
+        <label>Parent Page</label>
+        <select
+          @change=${(e: Event) => {
+            const val = (e.target as HTMLSelectElement).value;
+            setParentPageId(val || null);
+          }}
+        >
+          <option value="">None (top-level)</option>
+          ${allEntries.map(
+            (entry) =>
+              html`<option value=${entry.id}>${entry.title}</option>`,
+          )}
+        </select>
+        <div class="wiki-form-hint">
+          Place this page under another wiki page in the hierarchy.
         </div>
       </div>
 

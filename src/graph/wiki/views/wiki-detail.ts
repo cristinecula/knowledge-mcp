@@ -10,8 +10,25 @@ import {
   type WikiEntry,
   type WikiLink,
 } from '../api.js';
-import { escapeHtml, timeAgo, statusBadge } from '../util.js';
+import { escapeHtml, timeAgo, statusBadge, slugify } from '../util.js';
 import { resolveWikiLinks } from '../wikilinks.js';
+
+/** Build breadcrumb chain from current entry up to root. */
+function buildBreadcrumbs(entry: WikiEntry, allEntries: WikiEntry[]): WikiEntry[] {
+  const byId = new Map<string, WikiEntry>();
+  for (const e of allEntries) byId.set(e.id, e);
+
+  const crumbs: WikiEntry[] = [];
+  let current: WikiEntry | undefined = entry;
+  const seen = new Set<string>();
+  while (current && current.parent_page_id && !seen.has(current.id)) {
+    seen.add(current.id);
+    const parent = byId.get(current.parent_page_id);
+    if (parent) crumbs.unshift(parent);
+    current = parent;
+  }
+  return crumbs;
+}
 
 function WikiDetail(this: HTMLElement & { entryId: string }) {
   const entryId = this.entryId;
@@ -57,6 +74,12 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
       ? (marked.parse(resolveWikiLinks(entry.content, allEntries)) as string)
       : '<div class="wiki-content-empty">No content yet. An agent will fill this in based on the declaration.</div>';
 
+  // Build breadcrumbs (ancestors)
+  const breadcrumbs = buildBreadcrumbs(entry, allEntries);
+
+  // Find child pages
+  const children = allEntries.filter((e) => e.parent_page_id === entry.id);
+
   const handleDelete = async () => {
     if (confirm(`Delete wiki page "${entry.title}"?`)) {
       await deleteWikiEntry(entry.id);
@@ -66,6 +89,40 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
 
   return html`
     <div class="wiki-detail">
+      ${breadcrumbs.length > 0
+        ? html`<nav class="wiki-breadcrumbs">
+            <a
+              class="wiki-breadcrumb-link"
+              @click=${(e: Event) => {
+                e.preventDefault();
+                navigate('/wiki', null, { replace: false });
+              }}
+              href="/wiki"
+              >Wiki</a
+            >
+            ${breadcrumbs.map(
+              (bc) => html`
+                <span class="wiki-breadcrumb-sep">/</span>
+                <a
+                  class="wiki-breadcrumb-link"
+                  href="/wiki/${bc.id}/${slugify(bc.title)}"
+                  @click=${(e: Event) => {
+                    e.preventDefault();
+                    navigate(
+                      `/wiki/${bc.id}/${slugify(bc.title)}`,
+                      null,
+                      { replace: false },
+                    );
+                  }}
+                  >${bc.title}</a
+                >
+              `,
+            )}
+            <span class="wiki-breadcrumb-sep">/</span>
+            <span class="wiki-breadcrumb-current">${entry.title}</span>
+          </nav>`
+        : null}
+
       <div class="wiki-detail-header">
         <div>
           <div class="wiki-detail-title">${entry.title}</div>
@@ -145,6 +202,35 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
                 <code>${otherId.slice(0, 8)}...</code>
               </div>`;
             })}
+          </div>`
+        : null}
+
+      ${children.length > 0
+        ? html`<div class="wiki-children">
+            <h4 class="wiki-children-heading">
+              Child Pages (${children.length})
+            </h4>
+            <ul class="wiki-children-list">
+              ${children.map(
+                (child) => html`
+                  <li>
+                    <a
+                      class="wiki-children-link"
+                      href="/wiki/${child.id}/${slugify(child.title)}"
+                      @click=${(e: Event) => {
+                        e.preventDefault();
+                        navigate(
+                          `/wiki/${child.id}/${slugify(child.title)}`,
+                          null,
+                          { replace: false },
+                        );
+                      }}
+                      >${child.title}</a
+                    >
+                  </li>
+                `,
+              )}
+            </ul>
           </div>`
         : null}
 
