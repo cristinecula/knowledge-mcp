@@ -617,3 +617,32 @@ svg {
   background: #12261e;
   color: #3fb950;
 }
+
+/* Metadata diff summary */
+.diff-meta {
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: #161b22;
+  font-size: 12px;
+}
+
+.diff-meta-title {
+  color: #8b949e;
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.diff-meta-item {
+  padding: 2px 0;
+  line-height: 1.5;
+}
+
+.diff-meta-label {
+  color: #8b949e;
+  margin-right: 4px;
+}

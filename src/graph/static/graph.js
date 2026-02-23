@@ -543,26 +543,105 @@ window.showHistoricalVersion = async function(id, hash, el) {
   `;
   contentEl.parentNode.insertBefore(banner, contentEl);
 
-  // Compute and render word-level diff
-  if (typeof Diff !== 'undefined' && Diff.diffWords) {
+  // Build metadata diff summary
+  const metaChanges = buildMetadataDiff(entry, parent);
+
+  // Compute content diff
+  let contentDiffHtml = '';
+  const hasDiff = typeof Diff !== 'undefined' && Diff.diffWords;
+
+  if (hasDiff) {
     const oldContent = parent ? parent.content : '';
     const newContent = entry.content;
     const changes = Diff.diffWords(oldContent, newContent);
-    const diffHtml = changes.map(part => {
-      const escaped = part.value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-      if (part.removed) return `<del class="diff-del">${escaped}</del>`;
-      if (part.added) return `<ins class="diff-ins">${escaped}</ins>`;
-      return escaped;
-    }).join('');
-    contentEl.innerHTML = `<div class="diff-view">${diffHtml}</div>`;
-  } else {
-    // Fallback: render as markdown if jsdiff not available
-    contentEl.innerHTML = marked.parse(entry.content);
+    const hasContentChanges = changes.some(part => part.added || part.removed);
+
+    if (hasContentChanges) {
+      contentDiffHtml = changes.map(part => {
+        const escaped = part.value
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        if (part.removed) return `<del class="diff-del">${escaped}</del>`;
+        if (part.added) return `<ins class="diff-ins">${escaped}</ins>`;
+        return escaped;
+      }).join('');
+    }
   }
+
+  // Render combined output
+  let html = '';
+
+  if (metaChanges.length > 0) {
+    html += '<div class="diff-meta"><div class="diff-meta-title">Changed fields</div>';
+    html += metaChanges.join('');
+    html += '</div>';
+  }
+
+  if (contentDiffHtml) {
+    html += `<div class="diff-view">${contentDiffHtml}</div>`;
+  } else if (!hasDiff) {
+    // jsdiff not available — fallback to rendered markdown
+    html += marked.parse(entry.content);
+  } else if (metaChanges.length === 0) {
+    // No metadata changes AND no content changes
+    html += '<div class="history-empty">No changes in this commit</div>';
+  }
+
+  contentEl.innerHTML = html;
 };
+
+/**
+ * Compare metadata fields between entry and parent, returning HTML strings
+ * for each changed field.
+ */
+function buildMetadataDiff(entry, parent) {
+  const changes = [];
+  const fields = [
+    { key: 'title', label: 'Title' },
+    { key: 'type', label: 'Type' },
+    { key: 'scope', label: 'Scope' },
+    { key: 'status', label: 'Status' },
+    { key: 'source', label: 'Source' },
+    { key: 'project', label: 'Project' },
+  ];
+
+  for (const { key, label } of fields) {
+    const oldVal = parent ? (parent[key] ?? '(none)') : null;
+    const newVal = entry[key] ?? '(none)';
+    if (!parent) {
+      // Initial commit — show all non-default fields
+      if (newVal && newVal !== '(none)') {
+        changes.push(`<div class="diff-meta-item"><span class="diff-meta-label">${label}:</span> <ins class="diff-ins">${escapeHtml(String(newVal))}</ins></div>`);
+      }
+    } else if (String(oldVal) !== String(newVal)) {
+      changes.push(`<div class="diff-meta-item"><span class="diff-meta-label">${label}:</span> <del class="diff-del">${escapeHtml(String(oldVal))}</del> → <ins class="diff-ins">${escapeHtml(String(newVal))}</ins></div>`);
+    }
+  }
+
+  // Tags diff (array comparison)
+  const oldTags = parent ? (parent.tags || []) : [];
+  const newTags = entry.tags || [];
+  const oldSet = new Set(oldTags);
+  const newSet = new Set(newTags);
+  const addedTags = newTags.filter(t => !oldSet.has(t));
+  const removedTags = oldTags.filter(t => !newSet.has(t));
+
+  if (addedTags.length > 0 || removedTags.length > 0) {
+    let tagHtml = '<div class="diff-meta-item"><span class="diff-meta-label">Tags:</span> ';
+    if (removedTags.length > 0) {
+      tagHtml += removedTags.map(t => `<del class="diff-del">${escapeHtml(t)}</del>`).join(' ');
+    }
+    if (addedTags.length > 0) {
+      if (removedTags.length > 0) tagHtml += ' ';
+      tagHtml += addedTags.map(t => `<ins class="diff-ins">${escapeHtml(t)}</ins>`).join(' ');
+    }
+    tagHtml += '</div>';
+    changes.push(tagHtml);
+  }
+
+  return changes;
+}
 
 window.restoreCurrentVersion = async function(id) {
   // Remove banner
