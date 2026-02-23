@@ -194,9 +194,122 @@ svg {
   padding: 12px;
   border-radius: 6px;
   border: 1px solid #30363d;
-  white-space: pre-wrap;
   max-height: 300px;
   overflow-y: auto;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Markdown rendering inside sidebar content */
+#sidebar .content h1,
+#sidebar .content h2,
+#sidebar .content h3,
+#sidebar .content h4,
+#sidebar .content h5,
+#sidebar .content h6 {
+  color: #f0f6fc;
+  margin-top: 12px;
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+#sidebar .content h1 { font-size: 18px; border-bottom: 1px solid #30363d; padding-bottom: 4px; }
+#sidebar .content h2 { font-size: 16px; border-bottom: 1px solid #30363d; padding-bottom: 4px; }
+#sidebar .content h3 { font-size: 15px; }
+#sidebar .content h4 { font-size: 14px; }
+
+#sidebar .content h1:first-child,
+#sidebar .content h2:first-child,
+#sidebar .content h3:first-child {
+  margin-top: 0;
+}
+
+#sidebar .content p {
+  margin: 0 0 8px 0;
+}
+
+#sidebar .content p:last-child {
+  margin-bottom: 0;
+}
+
+#sidebar .content ul,
+#sidebar .content ol {
+  padding-left: 20px;
+  margin: 4px 0 8px 0;
+}
+
+#sidebar .content li {
+  margin-bottom: 2px;
+}
+
+#sidebar .content code {
+  background: #161b22;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 13px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  color: #e6edf3;
+}
+
+#sidebar .content pre {
+  background: #161b22;
+  padding: 10px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 6px 0;
+  border: 1px solid #30363d;
+}
+
+#sidebar .content pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+#sidebar .content blockquote {
+  border-left: 3px solid #30363d;
+  padding-left: 10px;
+  margin: 6px 0;
+  color: #8b949e;
+}
+
+#sidebar .content a {
+  color: #58a6ff;
+  text-decoration: none;
+}
+
+#sidebar .content a:hover {
+  text-decoration: underline;
+}
+
+#sidebar .content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 6px 0;
+}
+
+#sidebar .content th,
+#sidebar .content td {
+  border: 1px solid #30363d;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+#sidebar .content th {
+  background: #161b22;
+  color: #f0f6fc;
+}
+
+#sidebar .content hr {
+  border: none;
+  border-top: 1px solid #30363d;
+  margin: 8px 0;
+}
+
+#sidebar .content img {
+  max-width: 100%;
+  border-radius: 4px;
 }
 
 #sidebar .tags {

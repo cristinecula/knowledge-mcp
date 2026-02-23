@@ -379,7 +379,7 @@ async function showSidebar(id) {
     html += `<div class="tags">${tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>`;
   }
 
-  html += `<div class="content">${escapeHtml(entry.content)}</div>`;
+  html += `<div class="content">${marked.parse(entry.content)}</div>`;
 
   if (links && links.length > 0) {
     html += `<div class="links-section"><h3>Links (${links.length})</h3>`;
