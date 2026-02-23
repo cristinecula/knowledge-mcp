@@ -54,12 +54,10 @@ export function registerStoreTool(server: McpServer): void {
         });
         syncWriteEntry(entry);
 
-        // Generate embedding for the new entry (non-fatal)
-        try {
-          await embedAndStore(entry.id, entry.title, entry.content, entry.tags);
-        } catch {
+        // Generate embedding in background (fire-and-forget — non-fatal, non-blocking)
+        embedAndStore(entry.id, entry.title, entry.content, entry.tags).catch(() => {
           // Embedding generation can fail (e.g., no provider configured)
-        }
+        });
 
         if (links && links.length > 0) {
           for (const link of links) {

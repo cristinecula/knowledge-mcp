@@ -55,13 +55,11 @@ export function registerUpdateTool(server: McpServer): void {
           // Schedule a debounced git commit
           scheduleCommit(`knowledge: update ${updated.type} "${updated.title}"`);
 
-          // Regenerate embedding if content-affecting fields changed (non-fatal)
+          // Regenerate embedding in background (fire-and-forget — non-fatal, non-blocking)
           if (title !== undefined || content !== undefined || tags !== undefined) {
-            try {
-              await embedAndStore(updated.id, updated.title, updated.content, updated.tags);
-            } catch {
+            embedAndStore(updated.id, updated.title, updated.content, updated.tags).catch(() => {
               // Embedding generation can fail (e.g., no provider configured)
-            }
+            });
           }
 
           // Cascade revalidation: flag entries linked via 'derived' or 'depends'
