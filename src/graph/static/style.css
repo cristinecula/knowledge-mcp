@@ -959,3 +959,22 @@ svg {
   margin-top: 16px;
   word-break: break-all;
 }
+
+/* Wiki inter-page links — [[Page Title]] */
+.wiki-link {
+  color: #58a6ff;
+  text-decoration: none;
+  border-bottom: 1px dotted #58a6ff44;
+  cursor: pointer;
+}
+
+.wiki-link:hover {
+  color: #79c0ff;
+  border-bottom-color: #79c0ff;
+}
+
+.wiki-link-broken {
+  color: #f85149;
+  border-bottom: 1px dashed #f8514944;
+  cursor: help;
+}

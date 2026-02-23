@@ -5,15 +5,18 @@ import { navigate } from '@neovici/cosmoz-router';
 import { marked } from 'marked';
 import {
   fetchEntry,
+  fetchWikiEntries,
   deleteWikiEntry,
   type WikiEntry,
   type WikiLink,
 } from '../api.js';
 import { escapeHtml, timeAgo, statusBadge } from '../util.js';
+import { resolveWikiLinks } from '../wikilinks.js';
 
 function WikiDetail(this: HTMLElement & { entryId: string }) {
   const entryId = this.entryId;
   const [entry, setEntry] = useState<WikiEntry | null>(null);
+  const [allEntries, setAllEntries] = useState<WikiEntry[]>([]);
   const [links, setLinks] = useState<WikiLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -23,16 +26,19 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
     let cancelled = false;
     setLoading(true);
     setNotFound(false);
-    fetchEntry(entryId).then((data) => {
-      if (cancelled) return;
-      if (!data || !data.entry) {
-        setNotFound(true);
-      } else {
-        setEntry(data.entry);
-        setLinks(data.links || []);
-      }
-      setLoading(false);
-    });
+    Promise.all([fetchEntry(entryId), fetchWikiEntries()]).then(
+      ([data, entries]) => {
+        if (cancelled) return;
+        if (!data || !data.entry) {
+          setNotFound(true);
+        } else {
+          setEntry(data.entry);
+          setLinks(data.links || []);
+          setAllEntries(entries);
+        }
+        setLoading(false);
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -48,7 +54,7 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
 
   const contentHtml =
     entry.content && entry.content.trim()
-      ? (marked.parse(entry.content) as string)
+      ? (marked.parse(resolveWikiLinks(entry.content, allEntries)) as string)
       : '<div class="wiki-content-empty">No content yet. An agent will fill this in based on the declaration.</div>';
 
   const handleDelete = async () => {
@@ -108,7 +114,19 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
           </div>`
         : null}
 
-      <div class="wiki-content" .innerHTML=${contentHtml}></div>
+      <div
+        class="wiki-content"
+        .innerHTML=${contentHtml}
+        @click=${(e: Event) => {
+          // Intercept wiki link clicks for client-side navigation
+          const target = e.target as HTMLElement;
+          const anchor = target.closest('a.wiki-link') as HTMLAnchorElement | null;
+          if (anchor) {
+            e.preventDefault();
+            navigate(anchor.getAttribute('href')!, null, { replace: false });
+          }
+        }}
+      ></div>
 
       ${links.length > 0
         ? html`<div style="margin-top:16px">
