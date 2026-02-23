@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { getGraphData, getKnowledgeById, getLinksForEntry, searchKnowledge } from '../db/queries.js';
 import { getEmbeddingProvider } from '../embeddings/provider.js';
 import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
-import { getEntryHistory, getEntryAtCommit } from '../sync/index.js';
+import { getEntryHistory, getEntryAtCommitWithParent } from '../sync/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = resolve(__dirname, 'static');
@@ -172,12 +172,12 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     const id = decodeURIComponent(historyVersionMatch[1]);
     const hash = decodeURIComponent(historyVersionMatch[2]);
     try {
-      const entry = getEntryAtCommit(id, hash);
-      if (!entry) {
+      const result = getEntryAtCommitWithParent(id, hash);
+      if (!result) {
         sendError(res, `Version not found: ${hash}`);
         return;
       }
-      sendJson(res, { entry });
+      sendJson(res, { entry: result.entry, parent: result.parent });
     } catch (error) {
       sendError(
         res,

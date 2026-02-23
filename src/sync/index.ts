@@ -31,5 +31,5 @@ export { detectConflict } from './merge.js';
 export type { MergeResult } from './merge.js';
 export { gitInit, gitCommitAll, gitPull, gitPush, isGitRepo, hasRemote, gitClone, gitAddRemote, gitFileLog, gitShowFile } from './git.js';
 export type { GitLogEntry } from './git.js';
-export { getEntryHistory, getEntryAtCommit } from './history.js';
-export type { HistoryCommit } from './history.js';
+export { getEntryHistory, getEntryAtCommit, getEntryAtCommitWithParent } from './history.js';
+export type { HistoryCommit, CommitWithParent } from './history.js';

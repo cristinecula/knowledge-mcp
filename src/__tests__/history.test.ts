@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { setupTestDb, teardownTestDb } from './helpers.js';
 import { gitInit, gitCommitAll, gitFileLog, gitShowFile } from '../sync/git.js';
-import { getEntryHistory, getEntryAtCommit } from '../sync/history.js';
+import { getEntryHistory, getEntryAtCommit, getEntryAtCommitWithParent } from '../sync/history.js';
 import { setSyncConfig } from '../sync/config.js';
 import { ensureRepoStructure, entryFilePath } from '../sync/fs.js';
 import { insertKnowledge } from '../db/queries.js';
@@ -347,6 +347,121 @@ describe('entry version history', () => {
 
     it('should return null for non-existent entry', () => {
       const result = getEntryAtCommit('00000000-0000-0000-0000-000000000000', 'abc1234');
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getEntryAtCommitWithParent (integration)', () => {
+    beforeEach(() => {
+      setupTestDb();
+      ensureRepoStructure(repoPath);
+
+      const config: SyncConfig = {
+        repos: [{ name: 'default', path: repoPath }],
+      };
+      setSyncConfig(config);
+    });
+
+    afterEach(() => {
+      setSyncConfig(null);
+      teardownTestDb();
+    });
+
+    it('should return entry and parent for a commit with history', () => {
+      const entry = insertKnowledge({
+        type: 'decision',
+        title: 'Test decision',
+        content: 'Original content',
+      });
+
+      const filePath = entryFilePath(repoPath, entry.type, entry.id);
+      const entryJson = {
+        id: entry.id,
+        type: entry.type,
+        title: entry.title,
+        content: 'Original content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'unknown',
+        status: 'active',
+        created_at: entry.created_at,
+        updated_at: entry.updated_at,
+      };
+      writeFileSync(filePath, JSON.stringify(entryJson, null, 2) + '\n');
+      gitCommitAll(repoPath, 'add decision');
+
+      // Update content
+      const updatedJson = { ...entryJson, content: 'Updated content', updated_at: new Date().toISOString() };
+      writeFileSync(filePath, JSON.stringify(updatedJson, null, 2) + '\n');
+      gitCommitAll(repoPath, 'update decision');
+
+      // Get history — history[0] is newest commit
+      const history = getEntryHistory(entry.id);
+      expect(history).toHaveLength(2);
+
+      // Fetch the latest commit with its parent
+      const result = getEntryAtCommitWithParent(entry.id, history[0].hash);
+      expect(result).not.toBeNull();
+      expect(result!.entry.content).toBe('Updated content');
+      expect(result!.parent).not.toBeNull();
+      expect(result!.parent!.content).toBe('Original content');
+    });
+
+    it('should return null parent for the first commit', () => {
+      const entry = insertKnowledge({
+        type: 'fact',
+        title: 'First fact',
+        content: 'Initial content',
+      });
+
+      const filePath = entryFilePath(repoPath, entry.type, entry.id);
+      const entryJson = {
+        id: entry.id,
+        type: entry.type,
+        title: entry.title,
+        content: 'Initial content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'unknown',
+        status: 'active',
+        created_at: entry.created_at,
+        updated_at: entry.updated_at,
+      };
+      writeFileSync(filePath, JSON.stringify(entryJson, null, 2) + '\n');
+      gitCommitAll(repoPath, 'add fact');
+
+      const history = getEntryHistory(entry.id);
+      expect(history).toHaveLength(1);
+
+      const result = getEntryAtCommitWithParent(entry.id, history[0].hash);
+      expect(result).not.toBeNull();
+      expect(result!.entry.content).toBe('Initial content');
+      expect(result!.parent).toBeNull();
+    });
+
+    it('should return null for invalid commit hash', () => {
+      const entry = insertKnowledge({
+        type: 'fact',
+        title: 'Test',
+        content: 'Content',
+      });
+
+      const result = getEntryAtCommitWithParent(entry.id, 'deadbeef1234567890deadbeef1234567890dead');
+      expect(result).toBeNull();
+    });
+
+    it('should return null when sync is not configured', () => {
+      const entry = insertKnowledge({
+        type: 'fact',
+        title: 'Test',
+        content: 'Content',
+      });
+
+      setSyncConfig(null);
+
+      const result = getEntryAtCommitWithParent(entry.id, 'abc1234');
       expect(result).toBeNull();
     });
   });

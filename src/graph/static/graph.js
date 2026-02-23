@@ -126,7 +126,8 @@ async function fetchEntryAtVersion(id, hash) {
   try {
     const res = await fetch(`/api/entry/${encodeURIComponent(id)}/history/${encodeURIComponent(hash)}`);
     const data = await res.json();
-    return data.entry || null;
+    if (!data.entry) return null;
+    return { entry: data.entry, parent: data.parent || null };
   } catch (err) {
     console.error('Failed to fetch entry version:', err);
     return null;
@@ -522,24 +523,45 @@ window.showHistoricalVersion = async function(id, hash, el) {
   const existingBanner = sidebarContent.querySelector('.history-version-banner');
   if (existingBanner) existingBanner.remove();
 
-  contentEl.innerHTML = '<div class="history-loading">Loading version...</div>';
+  contentEl.innerHTML = '<div class="history-loading">Loading diff...</div>';
 
-  const entry = await fetchEntryAtVersion(id, hash);
-  if (!entry) {
+  const result = await fetchEntryAtVersion(id, hash);
+  if (!result) {
     contentEl.innerHTML = '<div class="history-empty">Failed to load this version</div>';
     return;
   }
+
+  const { entry, parent } = result;
+  const shortHash = hash.substring(0, 7);
 
   // Insert banner above content
   const banner = document.createElement('div');
   banner.className = 'history-version-banner';
   banner.innerHTML = `
-    Viewing version from ${new Date(entry.updated_at).toLocaleDateString()}
+    Diff: <code>${shortHash}</code>${parent ? ' vs parent' : ' (initial)'} — ${new Date(entry.updated_at).toLocaleDateString()}
     <button onclick="restoreCurrentVersion('${id}')">Back to current</button>
   `;
   contentEl.parentNode.insertBefore(banner, contentEl);
 
-  contentEl.innerHTML = marked.parse(entry.content);
+  // Compute and render word-level diff
+  if (typeof Diff !== 'undefined' && Diff.diffWords) {
+    const oldContent = parent ? parent.content : '';
+    const newContent = entry.content;
+    const changes = Diff.diffWords(oldContent, newContent);
+    const diffHtml = changes.map(part => {
+      const escaped = part.value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      if (part.removed) return `<del class="diff-del">${escaped}</del>`;
+      if (part.added) return `<ins class="diff-ins">${escaped}</ins>`;
+      return escaped;
+    }).join('');
+    contentEl.innerHTML = `<div class="diff-view">${diffHtml}</div>`;
+  } else {
+    // Fallback: render as markdown if jsdiff not available
+    contentEl.innerHTML = marked.parse(entry.content);
+  }
 };
 
 window.restoreCurrentVersion = async function(id) {

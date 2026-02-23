@@ -63,3 +63,51 @@ export function getEntryAtCommit(id: string, commitHash: string): EntryJSON | nu
     return null;
   }
 }
+
+/** Result of getEntryAtCommitWithParent — the entry at a commit and optionally its parent version. */
+export interface CommitWithParent {
+  entry: EntryJSON;
+  parent: EntryJSON | null;
+}
+
+/**
+ * Get the entry content at a specific commit and at its parent commit.
+ *
+ * Used for diff rendering: `entry` is the version at `commitHash`,
+ * `parent` is the version at `commitHash~1` (null for the first commit).
+ */
+export function getEntryAtCommitWithParent(id: string, commitHash: string): CommitWithParent | null {
+  const entry = getKnowledgeById(id);
+  if (!entry) return null;
+
+  const config = getSyncConfig();
+  if (!config) return null;
+
+  const repo = resolveRepo(entry, config);
+  const filePath = entryFilePath(repo.path, entry.type, entry.id);
+  const relPath = relative(repo.path, filePath);
+
+  // Fetch entry at the requested commit
+  const content = gitShowFile(repo.path, commitHash, relPath);
+  if (!content) return null;
+
+  let parsedEntry: EntryJSON;
+  try {
+    parsedEntry = parseEntryJSON(JSON.parse(content));
+  } catch {
+    return null;
+  }
+
+  // Fetch entry at parent commit (commitHash~1)
+  let parsedParent: EntryJSON | null = null;
+  const parentContent = gitShowFile(repo.path, `${commitHash}~1`, relPath);
+  if (parentContent) {
+    try {
+      parsedParent = parseEntryJSON(JSON.parse(parentContent));
+    } catch {
+      // Parent version can't be parsed — treat as no parent (new file)
+    }
+  }
+
+  return { entry: parsedEntry, parent: parsedParent };
+}

@@ -597,3 +597,23 @@ svg {
   background: #30363d;
   border-color: #58a6ff;
 }
+
+/* Inline word-level diff view */
+.diff-view {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 13px;
+  padding: 8px;
+}
+
+.diff-del {
+  background: #3d1214;
+  color: #f85149;
+  text-decoration: line-through;
+}
+
+.diff-ins {
+  background: #12261e;
+  color: #3fb950;
+}
