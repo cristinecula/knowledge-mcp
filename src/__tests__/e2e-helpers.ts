@@ -78,6 +78,46 @@ export async function spawnAgent(remote: string, name: string): Promise<AgentHan
 }
 
 /**
+ * Spawn an MCP server with periodic sync enabled.
+ *
+ * Same as spawnAgent but with a configurable --sync-interval.
+ */
+export async function spawnAgentWithInterval(
+  remote: string,
+  name: string,
+  syncIntervalSec: number,
+): Promise<AgentHandle> {
+  const tmpDir = mkdtempSync(join(tmpdir(), `knowledge-e2e-${name}-`));
+  const dbPath = join(tmpDir, 'knowledge.db');
+  const clonePath = join(tmpDir, 'sync');
+
+  // Clone the bare remote
+  execFileSync('git', ['clone', remote, clonePath], { stdio: 'pipe' });
+
+  // Ensure basic git config for commits
+  execFileSync('git', ['config', 'user.email', `${name}@test.local`], { cwd: clonePath, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.name', name], { cwd: clonePath, stdio: 'pipe' });
+
+  const transport = new StdioClientTransport({
+    command: 'node',
+    args: [
+      SERVER_PATH,
+      '--db-path', dbPath,
+      '--sync-repo', clonePath,
+      '--sync-interval', String(syncIntervalSec),
+      '--embedding-provider', 'none',
+      '--no-graph',
+    ],
+    stderr: 'pipe',
+  });
+
+  const client = new Client({ name: `e2e-${name}`, version: '1.0.0' });
+  await client.connect(transport);
+
+  return { client, transport, dbPath, clonePath, name, tmpDir };
+}
+
+/**
  * Spawn an MCP server with a multi-repo sync config.
  *
  * @param configRepos - Array of { name, remote, scope?, project? } — each will be cloned

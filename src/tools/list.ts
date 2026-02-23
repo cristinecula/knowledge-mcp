@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { KNOWLEDGE_TYPES, SCOPES } from '../types.js';
-import { listKnowledge } from '../db/queries.js';
+import { listKnowledge, countKnowledge } from '../db/queries.js';
 
 export function registerListTool(server: McpServer): void {
   server.registerTool(
@@ -24,21 +24,31 @@ export function registerListTool(server: McpServer): void {
           .optional()
           .describe('Sort order: strength (default), recent (last accessed), created'),
         limit: z.number().min(1).max(100).optional().describe('Max results (default: 20, max: 100)'),
+        offset: z.number().min(0).optional().describe('Offset for pagination (default: 0). Use with limit to page through results.'),
       },
     },
-    async ({ type, project, scope, status, sort_by, limit }) => {
+    async ({ type, project, scope, status, sort_by, limit, offset }) => {
       try {
         const filterStatus = status ?? 'active';
+        const effectiveLimit = limit ?? 20;
+        const effectiveOffset = offset ?? 0;
 
-        const entries = listKnowledge({
+        const filterParams = {
           type,
           project,
           scope,
           status: filterStatus,
-          sortBy: sort_by,
-          limit: limit ?? 20,
           includeWeak: filterStatus === 'all' || filterStatus === 'dormant',
           includeDormant: filterStatus === 'all' || filterStatus === 'dormant',
+        };
+
+        const total = countKnowledge(filterParams);
+
+        const entries = listKnowledge({
+          ...filterParams,
+          sortBy: sort_by,
+          limit: effectiveLimit,
+          offset: effectiveOffset,
         });
 
         if (entries.length === 0) {
@@ -79,6 +89,9 @@ export function registerListTool(server: McpServer): void {
               text: JSON.stringify(
                 {
                   count: results.length,
+                  total,
+                  offset: effectiveOffset,
+                  has_more: (effectiveOffset + results.length) < total,
                   filter: { type, project, scope, status: filterStatus, sort_by },
                   results,
                 },

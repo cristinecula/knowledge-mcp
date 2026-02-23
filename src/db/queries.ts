@@ -170,6 +170,7 @@ export interface SearchParams {
   status?: string;
   sortBy?: 'strength' | 'recent' | 'created';
   limit?: number;
+  offset?: number;
 }
 
 export function searchKnowledge(params: SearchParams): KnowledgeEntry[] {
@@ -268,6 +269,11 @@ export function searchKnowledge(params: SearchParams): KnowledgeEntry[] {
   sql += ' LIMIT ?';
   bindings.push(params.limit ?? 10);
 
+  if (params.offset && params.offset > 0) {
+    sql += ' OFFSET ?';
+    bindings.push(params.offset);
+  }
+
   const rows = db.prepare(sql).all(...bindings) as (KnowledgeRow & {
     rank?: number;
   })[];
@@ -277,6 +283,67 @@ export function searchKnowledge(params: SearchParams): KnowledgeEntry[] {
 
 export function listKnowledge(params: SearchParams): KnowledgeEntry[] {
   return searchKnowledge({ ...params, query: undefined });
+}
+
+/**
+ * Count total entries matching the given filters (no LIMIT/OFFSET).
+ * Used for pagination to determine total result count.
+ */
+export function countKnowledge(params: SearchParams): number {
+  const db = getDb();
+
+  let sql = `SELECT COUNT(*) as total FROM knowledge k WHERE 1=1`;
+  const bindings: unknown[] = [];
+
+  // Filters (same logic as searchKnowledge, minus FTS/sorting/limit/offset)
+  if (params.type) {
+    sql += ' AND k.type = ?';
+    bindings.push(params.type);
+  }
+
+  if (params.project) {
+    sql += ' AND k.project = ?';
+    bindings.push(params.project);
+  }
+
+  if (params.scope) {
+    const scopes: Scope[] = [];
+    if (params.scope === 'repo') scopes.push('repo', 'project', 'company');
+    else if (params.scope === 'project') scopes.push('project', 'company');
+    else scopes.push('company');
+
+    sql += ` AND k.scope IN (${scopes.map(() => '?').join(',')})`;
+    bindings.push(...scopes);
+  }
+
+  if (params.tags && params.tags.length > 0) {
+    for (const tag of params.tags) {
+      sql += ' AND k.tags LIKE ?';
+      bindings.push(`%"${tag}"%`);
+    }
+  }
+
+  // Status filter (same logic as searchKnowledge)
+  if (params.status && params.status !== 'all') {
+    if (params.status === 'weak') {
+      sql += ' AND k.status = ? AND k.strength >= 0.1 AND k.strength < 0.5';
+      bindings.push('active');
+    } else {
+      sql += ' AND k.status = ?';
+      bindings.push(params.status);
+    }
+  } else if (!params.includeDormant) {
+    const includeStatuses = ['active', 'needs_revalidation'];
+    sql += ` AND k.status IN (${includeStatuses.map(() => '?').join(',')})`;
+    bindings.push(...includeStatuses);
+
+    if (!params.includeWeak) {
+      sql += ` AND k.strength >= 0.5`;
+    }
+  }
+
+  const row = db.prepare(sql).get(...bindings) as { total: number };
+  return row.total;
 }
 
 export function getAllEntries(): KnowledgeEntry[] {

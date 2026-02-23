@@ -16,6 +16,7 @@ import {
   createBareRemote,
   spawnAgent,
   spawnAgentWithConfig,
+  spawnAgentWithInterval,
   spawnAgentAutoClone,
   callTool,
   storeEntry,
@@ -901,6 +902,111 @@ describe('e2e sync', { timeout: TEST_TIMEOUT }, () => {
 
       const found = results.results.find((r) => r.id === entry.id);
       expect(found).toBeTruthy();
+    });
+  });
+
+  // =====================================================================
+  // 9. Periodic automatic sync
+  // =====================================================================
+  describe('periodic automatic sync', () => {
+    let remote: string;
+    let agentA: AgentHandle;
+    let agentB: AgentHandle;
+
+    beforeEach(async () => {
+      remote = createBareRemote();
+    });
+
+    afterEach(async () => {
+      if (agentA) await destroyAgent(agentA);
+      if (agentB) await destroyAgent(agentB);
+      destroyRemote(remote);
+    });
+
+    it('should automatically pull remote changes on interval', async () => {
+      // Agent A is a normal agent (no periodic sync)
+      agentA = await spawnAgent(remote, 'alice');
+
+      // Agent B has periodic sync every 2 seconds
+      agentB = await spawnAgentWithInterval(remote, 'bob', 2);
+
+      // Agent A stores an entry and pushes
+      const entry = await storeEntry(agentA, {
+        title: 'Periodic pull test entry',
+        content: 'Should be auto-pulled by Bob',
+        type: 'fact',
+      });
+      await syncAgent(agentA, 'push');
+
+      // Wait for Agent B's periodic sync to fire (2s interval + buffer)
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+
+      // Agent B should have the entry now (pulled automatically)
+      const results = await queryEntries(agentB, 'Periodic pull test entry');
+      expect(results.count).toBeGreaterThanOrEqual(1);
+      const found = results.results.find((r) => r.id === entry.id);
+      expect(found).toBeTruthy();
+      expect(found!.title).toBe('Periodic pull test entry');
+    });
+
+    it('should automatically push local changes on interval', async () => {
+      // Agent A has periodic sync every 2 seconds
+      agentA = await spawnAgentWithInterval(remote, 'alice', 2);
+
+      // Agent A stores an entry (write-through commits locally)
+      const entry = await storeEntry(agentA, {
+        title: 'Periodic push test entry',
+        content: 'Should be auto-pushed by Alice',
+        type: 'decision',
+      });
+
+      // Wait for Agent A's periodic sync to fire and push
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+
+      // Spawn Agent B (normal) — it pulls on startup
+      agentB = await spawnAgent(remote, 'bob');
+
+      // Agent B should have the entry (pulled on startup after Alice pushed)
+      const results = await queryEntries(agentB, 'Periodic push test entry');
+      expect(results.count).toBeGreaterThanOrEqual(1);
+      const found = results.results.find((r) => r.id === entry.id);
+      expect(found).toBeTruthy();
+      expect(found!.title).toBe('Periodic push test entry');
+    });
+
+    it('should not conflict when manual sync overlaps with periodic sync', async () => {
+      // Agent A has periodic sync every 2 seconds
+      agentA = await spawnAgentWithInterval(remote, 'alice', 2);
+
+      // Store some entries
+      await storeEntry(agentA, {
+        title: 'Overlap test entry 1',
+        content: 'First entry',
+      });
+
+      // Manually trigger sync while periodic sync is also running
+      const manualResult = await syncAgent(agentA, 'both');
+      // Should succeed without error (manual sync acquires mutex or gets
+      // "sync already in progress" which is handled gracefully)
+      expect(manualResult).toBeTruthy();
+
+      // Store another entry
+      await storeEntry(agentA, {
+        title: 'Overlap test entry 2',
+        content: 'Second entry',
+      });
+
+      // Wait for periodic sync
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+
+      // Spawn Agent B to verify entries are synced
+      agentB = await spawnAgent(remote, 'bob');
+
+      const results1 = await queryEntries(agentB, 'Overlap test entry 1');
+      expect(results1.count).toBeGreaterThanOrEqual(1);
+
+      const results2 = await queryEntries(agentB, 'Overlap test entry 2');
+      expect(results2.count).toBeGreaterThanOrEqual(1);
     });
   });
 });

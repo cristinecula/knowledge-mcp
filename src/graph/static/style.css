@@ -42,7 +42,8 @@ svg {
 }
 
 #controls select,
-#controls button {
+#controls button,
+#controls input[type="text"] {
   background: #161b22;
   color: #c9d1d9;
   border: 1px solid #30363d;
@@ -52,8 +53,23 @@ svg {
   cursor: pointer;
 }
 
+#controls input[type="text"] {
+  min-width: 200px;
+  cursor: text;
+}
+
+#controls input[type="text"]::placeholder {
+  color: #484f58;
+}
+
+#controls input[type="text"]:focus {
+  border-color: #58a6ff;
+  outline: none;
+}
+
 #controls select:hover,
-#controls button:hover {
+#controls button:hover,
+#controls input[type="text"]:hover {
   border-color: #58a6ff;
 }
 

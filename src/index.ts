@@ -25,7 +25,10 @@ import { existsSync } from 'node:fs';
 import {
   setSyncConfig,
   isSyncEnabled,
+  isSyncInProgress,
+  setSyncInProgress,
   pull,
+  push,
   loadSyncConfig,
   ensureRepoStructure,
   gitInit,
@@ -47,6 +50,7 @@ let embeddingModel: string | undefined;
 let backfill = false;
 let syncRepoPath: string | undefined;
 let syncConfigPath: string | undefined;
+let syncIntervalSec = 300; // default: 5 minutes (0 = disabled)
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--db-path' && args[i + 1]) {
@@ -67,6 +71,8 @@ for (let i = 0; i < args.length; i++) {
     syncRepoPath = args[++i];
   } else if (args[i] === '--sync-config' && args[i + 1]) {
     syncConfigPath = args[++i];
+  } else if (args[i] === '--sync-interval' && args[i + 1]) {
+    syncIntervalSec = parseInt(args[++i], 10);
   } else if (args[i] === '--help') {
     console.error(`
 knowledge-mcp — Shared Agent Knowledge System (MCP Server)
@@ -84,6 +90,7 @@ Options:
   --backfill-embeddings         Generate embeddings for all existing entries on startup
   --sync-repo <path>            Path to single git repo for knowledge sharing
   --sync-config <path>          Path to JSON config file for multi-repo sync
+  --sync-interval <seconds>    Periodic sync interval in seconds (default: 300, 0 to disable)
   --help                        Show this help message
 `);
     process.exit(0);
@@ -259,9 +266,37 @@ async function main(): Promise<void> {
     }
   }, 60 * 60 * 1000);
 
+  // Set up periodic sync (if enabled and interval > 0)
+  let syncInterval: ReturnType<typeof setInterval> | null = null;
+  if (config && syncIntervalSec > 0) {
+    syncInterval = setInterval(async () => {
+      if (isSyncInProgress()) return;
+      setSyncInProgress(true);
+      try {
+        const pullResult = await pull(config);
+        const pushResult = push(config);
+        const total = pullResult.new_entries + pullResult.updated + pullResult.deleted +
+          pullResult.conflicts + pushResult.new_entries + pushResult.updated + pushResult.deleted;
+        if (total > 0) {
+          console.error(
+            `Periodic sync: pulled ${pullResult.new_entries} new, ${pullResult.updated} updated, ${pullResult.deleted} deleted, ${pullResult.conflicts} conflicts; ` +
+            `pushed ${pushResult.new_entries} new, ${pushResult.updated} updated, ${pushResult.deleted} deleted`,
+          );
+        }
+      } catch (error) {
+        console.error(`Periodic sync error: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        setSyncInProgress(false);
+      }
+    }, syncIntervalSec * 1000);
+
+    console.error(`Periodic sync: every ${syncIntervalSec}s`);
+  }
+
   // Clean shutdown
   const shutdown = async () => {
     clearInterval(maintenanceInterval);
+    if (syncInterval) clearInterval(syncInterval);
     await stopGraphServer();
     closeDb();
     process.exit(0);

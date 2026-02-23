@@ -39,6 +39,8 @@ const STATUS_OPACITY = {
 let graphData = { nodes: [], links: [] };
 let simulation = null;
 let selectedNodeId = null;
+let searchMatchIds = new Set(); // IDs of nodes matching the current search
+let searchActive = false; // Whether a search is currently active
 
 // DOM refs
 const svg = d3.select('#graph');
@@ -51,6 +53,7 @@ const statsEl = document.getElementById('stats');
 const filterType = document.getElementById('filter-type');
 const filterScope = document.getElementById('filter-scope');
 const filterStatus = document.getElementById('filter-status');
+const filterSearch = document.getElementById('filter-search');
 const btnRefresh = document.getElementById('btn-refresh');
 
 // Zoom
@@ -133,7 +136,8 @@ function render(data) {
   const filtered = applyFilters(data);
 
   // Update stats
-  statsEl.textContent = `${filtered.nodes.length} entries, ${filtered.links.length} links`;
+  const searchSuffix = searchActive ? ` (${searchMatchIds.size} match${searchMatchIds.size !== 1 ? 'es' : ''})` : '';
+  statsEl.textContent = `${filtered.nodes.length} entries, ${filtered.links.length} links${searchSuffix}`;
 
   // Clear previous
   zoomGroup.selectAll('*').remove();
@@ -169,7 +173,13 @@ function render(data) {
     .join('line')
     .attr('stroke', d => LINK_COLORS[d.link_type] || '#30363d')
     .attr('stroke-width', 1.5)
-    .attr('stroke-opacity', 0.5)
+    .attr('stroke-opacity', d => {
+      if (!searchActive) return 0.5;
+      const srcId = typeof d.source === 'object' ? d.source.id : d.source;
+      const tgtId = typeof d.target === 'object' ? d.target.id : d.target;
+      if (searchMatchIds.has(srcId) && searchMatchIds.has(tgtId)) return 0.5;
+      return 0.08;
+    })
     .attr('stroke-dasharray', d => LINK_DASH[d.link_type] || null)
     .attr('marker-end', d => `url(#arrow-${d.link_type})`);
 
@@ -180,13 +190,19 @@ function render(data) {
     .join('circle')
     .attr('r', d => radiusScale(d.strength))
     .attr('fill', d => TYPE_COLORS[d.type] || '#8b949e')
-    .attr('opacity', d => STATUS_OPACITY[d.status] ?? 0.5)
+    .attr('opacity', d => {
+      const baseOpacity = STATUS_OPACITY[d.status] ?? 0.5;
+      if (searchActive && !searchMatchIds.has(d.id)) return baseOpacity * 0.15;
+      return baseOpacity;
+    })
     .attr('stroke', d => {
+      if (searchActive && searchMatchIds.has(d.id)) return '#f0f6fc';
       if (d.status === 'needs_revalidation') return '#d29922';
       if (d.id === selectedNodeId) return '#f0f6fc';
       return 'none';
     })
     .attr('stroke-width', d => {
+      if (searchActive && searchMatchIds.has(d.id)) return 2.5;
       if (d.status === 'needs_revalidation') return 3;
       if (d.id === selectedNodeId) return 2;
       return 0;
@@ -205,6 +221,10 @@ function render(data) {
     .join('text')
     .attr('class', 'node-label')
     .attr('dy', d => radiusScale(d.strength) + 14)
+    .attr('opacity', d => {
+      if (searchActive && !searchMatchIds.has(d.id)) return 0.15;
+      return 1;
+    })
     .text(d => d.title.length > 30 ? d.title.slice(0, 28) + '...' : d.title);
 
   // Hover tooltip
@@ -383,6 +403,119 @@ filterStatus.addEventListener('change', () => render(graphData));
 btnRefresh.addEventListener('click', async () => {
   graphData = await fetchGraphData();
   render(graphData);
+});
+
+// --- Search functionality ---
+
+/**
+ * Zoom/pan to fit all nodes with the given IDs in view.
+ * If no IDs provided or no matching nodes found, resets to fit all.
+ */
+function zoomToFitNodes(nodeIds) {
+  if (!simulation || !nodeIds || nodeIds.size === 0) return;
+
+  // Wait for simulation to settle a bit before zooming
+  setTimeout(() => {
+    const matchingNodes = simulation.nodes().filter(n => nodeIds.has(n.id));
+    if (matchingNodes.length === 0) return;
+
+    const padding = 80;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    // Compute bounding box of matching nodes
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of matchingNodes) {
+      if (n.x < minX) minX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y > maxY) maxY = n.y;
+    }
+
+    // Add padding
+    minX -= padding;
+    minY -= padding;
+    maxX += padding;
+    maxY += padding;
+
+    const boxWidth = maxX - minX;
+    const boxHeight = maxY - minY;
+
+    // Calculate scale and translate to center the bounding box
+    const scale = Math.min(
+      width / boxWidth,
+      height / boxHeight,
+      2, // max zoom
+    );
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    const transform = d3.zoomIdentity
+      .translate(width / 2, height / 2)
+      .scale(scale)
+      .translate(-cx, -cy);
+
+    svg.transition()
+      .duration(500)
+      .call(zoom.transform, transform);
+  }, 300);
+}
+
+// Debounce utility
+function debounce(fn, delay) {
+  let timer = null;
+  return function (...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+// Search handler
+const handleSearch = debounce(async (query) => {
+  if (!query || query.trim().length === 0) {
+    // Clear search
+    searchActive = false;
+    searchMatchIds = new Set();
+    render(graphData);
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}&limit=50`);
+    const data = await res.json();
+
+    if (data.results && data.results.length > 0) {
+      searchActive = true;
+      searchMatchIds = new Set(data.results.map(r => r.id));
+    } else {
+      searchActive = true;
+      searchMatchIds = new Set(); // No matches — dim everything
+    }
+
+    render(graphData);
+
+    // Auto-zoom to matching nodes
+    if (searchMatchIds.size > 0) {
+      zoomToFitNodes(searchMatchIds);
+    }
+  } catch (err) {
+    console.error('Search failed:', err);
+  }
+}, 300);
+
+// Wire up search input
+filterSearch.addEventListener('input', (e) => {
+  handleSearch(e.target.value);
+});
+
+// Clear search on Escape
+filterSearch.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    filterSearch.value = '';
+    searchActive = false;
+    searchMatchIds = new Set();
+    render(graphData);
+  }
 });
 
 // Handle window resize

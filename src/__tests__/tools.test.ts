@@ -13,6 +13,7 @@ import {
   getKnowledgeById,
   searchKnowledge,
   listKnowledge,
+  countKnowledge,
   insertLink,
   getLinksForEntry,
   getLinkedEntries,
@@ -560,5 +561,107 @@ describe('deprecation reason', () => {
   it('should return null when entry not found', () => {
     const result = deprecateKnowledge('00000000-0000-0000-0000-000000000000', 'Does not exist');
     expect(result).toBeNull();
+  });
+});
+
+// === Pagination (list_knowledge) ===
+
+describe('list_knowledge pagination', () => {
+  function seedEntries(count: number, overrides?: Partial<Parameters<typeof insertKnowledge>[0]>) {
+    const entries = [];
+    for (let i = 0; i < count; i++) {
+      entries.push(
+        insertKnowledge({
+          type: 'fact',
+          title: `Entry ${String(i).padStart(3, '0')}`,
+          content: `Content for entry ${i}`,
+          ...overrides,
+        }),
+      );
+    }
+    return entries;
+  }
+
+  it('should return first page with offset 0 and correct total', () => {
+    seedEntries(15);
+
+    const total = countKnowledge({ status: 'active', includeWeak: true });
+    expect(total).toBe(15);
+
+    const page1 = listKnowledge({ limit: 5, offset: 0, includeWeak: true });
+    expect(page1).toHaveLength(5);
+  });
+
+  it('should return second page with offset 5', () => {
+    const entries = seedEntries(15);
+
+    const page1 = listKnowledge({ limit: 5, offset: 0, sortBy: 'created', includeWeak: true });
+    const page2 = listKnowledge({ limit: 5, offset: 5, sortBy: 'created', includeWeak: true });
+
+    expect(page1).toHaveLength(5);
+    expect(page2).toHaveLength(5);
+
+    // No overlap between pages
+    const page1Ids = new Set(page1.map((e) => e.id));
+    const page2Ids = new Set(page2.map((e) => e.id));
+    for (const id of page2Ids) {
+      expect(page1Ids.has(id)).toBe(false);
+    }
+  });
+
+  it('should return partial page when offset near end', () => {
+    seedEntries(12);
+
+    const page = listKnowledge({ limit: 5, offset: 10, includeWeak: true });
+    expect(page).toHaveLength(2);
+  });
+
+  it('should return empty when offset past all entries', () => {
+    seedEntries(5);
+
+    const page = listKnowledge({ limit: 5, offset: 100, includeWeak: true });
+    expect(page).toHaveLength(0);
+  });
+
+  it('should count correctly with type filter', () => {
+    seedEntries(8, { type: 'fact' });
+    seedEntries(4, { type: 'decision' });
+
+    const totalAll = countKnowledge({ includeWeak: true });
+    expect(totalAll).toBe(12);
+
+    const totalFacts = countKnowledge({ type: 'fact', includeWeak: true });
+    expect(totalFacts).toBe(8);
+
+    const totalDecisions = countKnowledge({ type: 'decision', includeWeak: true });
+    expect(totalDecisions).toBe(4);
+  });
+
+  it('should paginate with type filter applied to both count and list', () => {
+    seedEntries(8, { type: 'fact' });
+    seedEntries(4, { type: 'decision' });
+
+    const total = countKnowledge({ type: 'fact', includeWeak: true });
+    expect(total).toBe(8);
+
+    const page1 = listKnowledge({ type: 'fact', limit: 5, offset: 0, includeWeak: true });
+    const page2 = listKnowledge({ type: 'fact', limit: 5, offset: 5, includeWeak: true });
+
+    expect(page1).toHaveLength(5);
+    expect(page2).toHaveLength(3);
+
+    // All returned entries are facts
+    for (const e of [...page1, ...page2]) {
+      expect(e.type).toBe('fact');
+    }
+  });
+
+  it('should use default offset of 0 when not specified', () => {
+    seedEntries(10);
+
+    const withOffset = listKnowledge({ limit: 5, offset: 0, includeWeak: true });
+    const withoutOffset = listKnowledge({ limit: 5, includeWeak: true });
+
+    expect(withOffset.map((e) => e.id)).toEqual(withoutOffset.map((e) => e.id));
   });
 });

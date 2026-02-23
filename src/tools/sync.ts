@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getSyncConfig, isSyncEnabled, pull, push } from '../sync/index.js';
+import { getSyncConfig, isSyncEnabled, isSyncInProgress, setSyncInProgress, pull, push } from '../sync/index.js';
 
 export function registerSyncTool(server: McpServer): void {
   server.registerTool(
@@ -35,44 +35,61 @@ export function registerSyncTool(server: McpServer): void {
           };
         }
 
-        const config = getSyncConfig()!;
-        const dir = direction ?? 'both';
-        const result: Record<string, unknown> = { direction: dir };
-
-        if (dir === 'pull' || dir === 'both') {
-          const pullResult = await pull(config);
-          result.pulled = {
-            new: pullResult.new_entries,
-            updated: pullResult.updated,
-            deleted: pullResult.deleted,
-            conflicts: pullResult.conflicts,
-            new_links: pullResult.new_links,
-            deleted_links: pullResult.deleted_links,
+        if (isSyncInProgress()) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: 'A sync operation is already in progress. Try again shortly.',
+              },
+            ],
+            isError: true,
           };
-          if (pullResult.conflict_details.length > 0) {
-            result.conflict_details = pullResult.conflict_details;
+        }
+
+        setSyncInProgress(true);
+        try {
+          const config = getSyncConfig()!;
+          const dir = direction ?? 'both';
+          const result: Record<string, unknown> = { direction: dir };
+
+          if (dir === 'pull' || dir === 'both') {
+            const pullResult = await pull(config);
+            result.pulled = {
+              new: pullResult.new_entries,
+              updated: pullResult.updated,
+              deleted: pullResult.deleted,
+              conflicts: pullResult.conflicts,
+              new_links: pullResult.new_links,
+              deleted_links: pullResult.deleted_links,
+            };
+            if (pullResult.conflict_details.length > 0) {
+              result.conflict_details = pullResult.conflict_details;
+            }
           }
-        }
 
-        if (dir === 'push' || dir === 'both') {
-          const pushResult = push(config);
-          result.pushed = {
-            new: pushResult.new_entries,
-            updated: pushResult.updated,
-            deleted: pushResult.deleted,
-            new_links: pushResult.new_links,
-            deleted_links: pushResult.deleted_links,
+          if (dir === 'push' || dir === 'both') {
+            const pushResult = push(config);
+            result.pushed = {
+              new: pushResult.new_entries,
+              updated: pushResult.updated,
+              deleted: pushResult.deleted,
+              new_links: pushResult.new_links,
+              deleted_links: pushResult.deleted_links,
+            };
+          }
+
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
           };
+        } finally {
+          setSyncInProgress(false);
         }
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
       } catch (error) {
         return {
           content: [
