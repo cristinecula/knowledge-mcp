@@ -119,6 +119,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           source: remote.source,
           status: remote.status,
           deprecation_reason: remote.deprecation_reason ?? null,
+          declaration: remote.declaration ?? null,
           created_at: remote.created_at,
           updated_at: remote.updated_at,
         });
@@ -161,6 +162,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           status: remote.status as Status,
           updated_at: remote.updated_at,
           deprecation_reason: remote.deprecation_reason ?? null,
+          declaration: remote.declaration ?? null,
         }, remote.updated_at);
         result.updated++;
 

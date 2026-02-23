@@ -100,6 +100,7 @@ function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean {
     local.source === remote.source &&
     local.status === remote.status &&
     (local.project ?? null) === (remote.project ?? null) &&
-    JSON.stringify(local.tags) === JSON.stringify(remote.tags)
+    JSON.stringify(local.tags) === JSON.stringify(remote.tags) &&
+    (local.declaration ?? null) === (remote.declaration ?? null)
   );
 }
