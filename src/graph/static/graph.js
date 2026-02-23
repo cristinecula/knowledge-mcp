@@ -8,6 +8,7 @@ const TYPE_COLORS = {
   fact: '#79c0ff',
   debug_note: '#d29922',
   process: '#8b949e',
+  wiki: '#f778ba',
 };
 
 const LINK_COLORS = {

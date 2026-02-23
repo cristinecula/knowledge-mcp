@@ -2,10 +2,21 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getGraphData, getKnowledgeById, getLinksForEntry, searchKnowledge } from '../db/queries.js';
+import {
+  getGraphData,
+  getKnowledgeById,
+  getLinksForEntry,
+  searchKnowledge,
+  insertKnowledge,
+  updateKnowledgeFields,
+  deleteKnowledge,
+  insertLink,
+  updateStatus,
+} from '../db/queries.js';
 import { getEmbeddingProvider } from '../embeddings/provider.js';
 import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
 import { getEntryHistory, getEntryAtCommitWithParent } from '../sync/index.js';
+import { SCOPES, type Scope } from '../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = resolve(__dirname, 'static');
@@ -18,6 +29,26 @@ const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
 };
+
+/** Read the full request body as a string. */
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('error', reject);
+  });
+}
+
+/** Parse JSON body, returning null on failure. */
+async function parseJsonBody(req: IncomingMessage): Promise<unknown | null> {
+  try {
+    const raw = await readBody(req);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
 function sendJson(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, {
@@ -57,7 +88,7 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     });
     res.end();
@@ -209,14 +240,189 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     return;
   }
 
+  // --- Wiki API routes ---
+
+  // GET /api/wiki — list all wiki entries
+  if (pathname === '/api/wiki' && req.method === 'GET') {
+    try {
+      const entries = searchKnowledge({
+        type: 'wiki',
+        limit: 250,
+        includeWeak: true,
+        includeDormant: true,
+        status: 'all',
+        sortBy: 'recent',
+      });
+      sendJson(res, { entries });
+    } catch (error) {
+      sendError(
+        res,
+        `Error listing wiki entries: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
+  // POST /api/wiki — create a new wiki entry
+  if (pathname === '/api/wiki' && req.method === 'POST') {
+    const body = await parseJsonBody(req) as Record<string, unknown> | null;
+    if (!body || typeof body.title !== 'string' || !body.title.trim()) {
+      sendError(res, 'Missing required field: title', 400);
+      return;
+    }
+
+    const title = (body.title as string).trim();
+    const declaration = typeof body.declaration === 'string' ? body.declaration.trim() || null : null;
+    const tags = Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === 'string') : [];
+    const project = typeof body.project === 'string' && body.project.trim() ? body.project.trim() : null;
+    const scope = (typeof body.scope === 'string' && (SCOPES as readonly string[]).includes(body.scope) ? body.scope : 'company') as Scope;
+    const source = typeof body.source === 'string' && body.source.trim() ? body.source.trim() : 'wiki-ui';
+    const sourceLinks = Array.isArray(body.sourceLinks) ? body.sourceLinks.filter((id): id is string => typeof id === 'string') : [];
+
+    try {
+      const entry = insertKnowledge({
+        type: 'wiki',
+        title,
+        content: '',
+        tags,
+        project,
+        scope,
+        source,
+        declaration,
+      });
+
+      // Mark as needs_revalidation so agents discover it
+      updateStatus(entry.id, 'needs_revalidation');
+
+      // Create source links (derived) if any
+      for (const sourceId of sourceLinks) {
+        const sourceEntry = getKnowledgeById(sourceId);
+        if (sourceEntry) {
+          insertLink({
+            sourceId: entry.id,
+            targetId: sourceId,
+            linkType: 'derived',
+            description: 'Wiki page source reference',
+            source: 'wiki-ui',
+          });
+        }
+      }
+
+      const updated = getKnowledgeById(entry.id)!;
+      sendJson(res, { entry: updated }, 201);
+    } catch (error) {
+      sendError(
+        res,
+        `Error creating wiki entry: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
+  // PUT /api/wiki/:id — update a wiki entry's declaration
+  const wikiUpdateMatch = pathname.match(/^\/api\/wiki\/([^/]+)$/);
+  if (wikiUpdateMatch && req.method === 'PUT') {
+    const id = decodeURIComponent(wikiUpdateMatch[1]);
+    const body = await parseJsonBody(req) as Record<string, unknown> | null;
+    if (!body) {
+      sendError(res, 'Invalid JSON body', 400);
+      return;
+    }
+
+    try {
+      const existing = getKnowledgeById(id);
+      if (!existing) {
+        sendError(res, `Wiki entry not found: ${id}`);
+        return;
+      }
+      if (existing.type !== 'wiki') {
+        sendError(res, 'Entry is not a wiki page', 400);
+        return;
+      }
+
+      const fields: Record<string, unknown> = {};
+
+      if (typeof body.title === 'string' && body.title.trim()) {
+        fields.title = body.title.trim();
+      }
+      if (body.declaration !== undefined) {
+        fields.declaration = typeof body.declaration === 'string' ? body.declaration.trim() || null : null;
+      }
+      if (Array.isArray(body.tags)) {
+        fields.tags = body.tags.filter((t): t is string => typeof t === 'string');
+      }
+      if (body.project !== undefined) {
+        fields.project = typeof body.project === 'string' && body.project.trim() ? body.project.trim() : null;
+      }
+      if (typeof body.scope === 'string' && (SCOPES as readonly string[]).includes(body.scope)) {
+        fields.scope = body.scope;
+      }
+
+      updateKnowledgeFields(id, fields as Parameters<typeof updateKnowledgeFields>[1]);
+
+      // Re-mark as needs_revalidation so agents re-process it
+      if (body.declaration !== undefined) {
+        updateStatus(id, 'needs_revalidation');
+      }
+
+      const result = getKnowledgeById(id)!;
+      sendJson(res, { entry: result });
+    } catch (error) {
+      sendError(
+        res,
+        `Error updating wiki entry: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
+  // DELETE /api/wiki/:id — delete a wiki entry
+  const wikiDeleteMatch = pathname.match(/^\/api\/wiki\/([^/]+)$/);
+  if (wikiDeleteMatch && req.method === 'DELETE') {
+    const id = decodeURIComponent(wikiDeleteMatch[1]);
+    try {
+      const existing = getKnowledgeById(id);
+      if (!existing) {
+        sendError(res, `Wiki entry not found: ${id}`);
+        return;
+      }
+      if (existing.type !== 'wiki') {
+        sendError(res, 'Entry is not a wiki page', 400);
+        return;
+      }
+      deleteKnowledge(id);
+      sendJson(res, { deleted: true });
+    } catch (error) {
+      sendError(
+        res,
+        `Error deleting wiki entry: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
   // Static files
   if (pathname === '/' || pathname === '/index.html') {
     serveStatic(res, resolve(STATIC_DIR, 'index.html'));
     return;
   }
 
+  if (pathname === '/wiki' || pathname === '/wiki.html') {
+    serveStatic(res, resolve(STATIC_DIR, 'wiki.html'));
+    return;
+  }
+
   if (pathname === '/graph.js') {
     serveStatic(res, resolve(STATIC_DIR, 'graph.js'));
+    return;
+  }
+
+  if (pathname === '/wiki.js') {
+    serveStatic(res, resolve(STATIC_DIR, 'wiki.js'));
     return;
   }
 
