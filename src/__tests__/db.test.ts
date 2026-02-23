@@ -700,6 +700,24 @@ describe('wiki knowledge type', () => {
     expect(results).toHaveLength(2);
     expect(results.every((r) => r.type === 'wiki')).toBe(true);
   });
+
+  it('should include needs_revalidation wiki entries in default list', () => {
+    const wiki = insertKnowledge({ type: 'wiki', title: 'Wiki Page', content: 'content' });
+    updateStatus(wiki.id, 'needs_revalidation');
+
+    // Default (no status) should include needs_revalidation
+    const defaultResults = listKnowledge({ type: 'wiki' });
+    expect(defaultResults).toHaveLength(1);
+    expect(defaultResults[0].status).toBe('needs_revalidation');
+
+    // Explicit status: 'active' should exclude needs_revalidation
+    const activeOnly = listKnowledge({ type: 'wiki', status: 'active' });
+    expect(activeOnly).toHaveLength(0);
+
+    // Explicit status: 'needs_revalidation' should include it
+    const revalOnly = listKnowledge({ type: 'wiki', status: 'needs_revalidation' });
+    expect(revalOnly).toHaveLength(1);
+  });
 });
 
 describe('declaration field', () => {

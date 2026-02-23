@@ -18,7 +18,7 @@ export function registerListTool(server: McpServer): void {
         status: z
           .enum(['active', 'dormant', 'deprecated', 'needs_revalidation', 'all'])
           .optional()
-          .describe('Filter by status (default: active)'),
+          .describe('Filter by status (default: active + needs_revalidation)'),
         sort_by: z
           .enum(['strength', 'recent', 'created'])
           .optional()
@@ -29,7 +29,6 @@ export function registerListTool(server: McpServer): void {
     },
     async ({ type, project, scope, status, sort_by, limit, offset }) => {
       try {
-        const filterStatus = status ?? 'active';
         const effectiveLimit = limit ?? 20;
         const effectiveOffset = offset ?? 0;
 
@@ -37,9 +36,9 @@ export function registerListTool(server: McpServer): void {
           type,
           project,
           scope,
-          status: filterStatus,
-          includeWeak: filterStatus === 'all' || filterStatus === 'dormant',
-          includeDormant: filterStatus === 'all' || filterStatus === 'dormant',
+          status,
+          includeWeak: status === 'all' || status === 'dormant',
+          includeDormant: status === 'all' || status === 'dormant',
         };
 
         const total = countKnowledge(filterParams);
@@ -92,7 +91,7 @@ export function registerListTool(server: McpServer): void {
                   total,
                   offset: effectiveOffset,
                   has_more: (effectiveOffset + results.length) < total,
-                  filter: { type, project, scope, status: filterStatus, sort_by },
+                  filter: { type, project, scope, status: status ?? 'active+needs_revalidation', sort_by },
                   results,
                 },
                 null,
