@@ -1,10 +1,10 @@
 // Wiki UI utilities
 
-const STATUS_LABELS: Record<string, { label: string; bg: string; color: string }> = {
-  active: { label: 'Active', bg: '#23863622', color: '#3fb950' },
-  needs_revalidation: { label: 'Pending', bg: '#d2992222', color: '#d29922' },
-  dormant: { label: 'Dormant', bg: '#8b949e22', color: '#8b949e' },
-  deprecated: { label: 'Deprecated', bg: '#f8514922', color: '#f85149' },
+const STATUS_LABELS: Record<string, { label: string; cssClass: string }> = {
+  active: { label: 'Active', cssClass: 'status-active' },
+  needs_revalidation: { label: 'Pending', cssClass: 'status-needs_revalidation' },
+  dormant: { label: 'Dormant', cssClass: 'status-dormant' },
+  deprecated: { label: 'Deprecated', cssClass: 'status-deprecated' },
 };
 
 export function escapeHtml(text: string): string {
@@ -40,5 +40,5 @@ export function slugify(text: string): string {
 
 export function statusBadge(status: string): string {
   const s = STATUS_LABELS[status] || STATUS_LABELS.active;
-  return `<span class="wiki-card-status" style="background:${s.bg};color:${s.color}">${s.label}</span>`;
+  return `<span class="wiki-card-status ${s.cssClass}">${s.label}</span>`;
 }

@@ -109,7 +109,7 @@ function WikiEdit(this: HTMLElement & { entryId: string }) {
 
   return html`
     <div class="wiki-form">
-      <h3 style="color:#f0f6fc;margin-bottom:8px">Edit Wiki Page</h3>
+      <h3>Edit Wiki Page</h3>
 
       <div class="wiki-form-group">
         <label>Title</label>

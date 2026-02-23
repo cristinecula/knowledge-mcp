@@ -1,9 +1,9 @@
-// <wiki-list> — displays wiki pages as a collapsible tree hierarchy
+// <wiki-list> — wiki home page with all pages listed
 
 import { component, html, useState, useEffect } from '@pionjs/pion';
 import { navigate } from '@neovici/cosmoz-router';
 import { fetchWikiEntries, type WikiEntry } from '../api.js';
-import { escapeHtml, timeAgo, statusBadge, slugify } from '../util.js';
+import { timeAgo, slugify } from '../util.js';
 
 interface TreeNode {
   entry: WikiEntry;
@@ -27,85 +27,49 @@ function buildTree(entries: WikiEntry[]): TreeNode[] {
     }
   }
 
+  // Sort alphabetically
+  const sortNodes = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) => a.entry.title.localeCompare(b.entry.title));
+    for (const n of nodes) sortNodes(n.children);
+  };
+  sortNodes(roots);
+
   return roots;
 }
 
-function renderCard(entry: WikiEntry) {
-  return html`
-    <div
-      class="wiki-card"
-      @click=${(e: Event) => {
-        e.preventDefault();
-        e.stopPropagation();
-        navigate(`/wiki/${entry.id}/${slugify(entry.title)}`, null, {
-          replace: false,
-        });
-      }}
-    >
-      <div class="wiki-card-main">
-        <div class="wiki-card-title">${entry.title}</div>
-        <div
-          class="wiki-card-meta"
-          .innerHTML=${`
-          ${statusBadge(entry.status)}
-          ${entry.project ? `<span>${escapeHtml(entry.project)}</span>` : ''}
-          <span>${entry.scope}</span>
-          <span>Updated ${timeAgo(entry.updated_at)}</span>
-        `}
-        ></div>
-        ${entry.tags && entry.tags.length > 0
-          ? html`<div class="wiki-card-tags">
-              ${entry.tags.map(
-                (t) => html`<span class="wiki-tag">${t}</span>`,
-              )}
-            </div>`
-          : null}
-      </div>
-    </div>
-  `;
-}
-
-function renderTree(
-  nodes: TreeNode[],
-  collapsed: Set<string>,
-  toggle: (id: string) => void,
-): unknown {
+function renderHomeTree(nodes: TreeNode[], depth: number): unknown {
   if (nodes.length === 0) return null;
-  return html`
-    <ul class="wiki-tree">
-      ${nodes.map((node) => {
-        const hasChildren = node.children.length > 0;
-        const isCollapsed = collapsed.has(node.entry.id);
-        return html`
-          <li class="wiki-tree-item">
-            <div class="wiki-tree-row">
-              ${hasChildren
-                ? html`<button
-                    class="wiki-tree-toggle"
-                    @click=${(e: Event) => {
-                      e.stopPropagation();
-                      toggle(node.entry.id);
-                    }}
-                  >
-                    ${isCollapsed ? '\u25B6' : '\u25BC'}
-                  </button>`
-                : html`<span class="wiki-tree-leaf"></span>`}
-              ${renderCard(node.entry)}
-            </div>
-            ${hasChildren && !isCollapsed
-              ? renderTree(node.children, collapsed, toggle)
-              : null}
-          </li>
-        `;
-      })}
-    </ul>
-  `;
+  return nodes.map((node) => {
+    const paddingLeft = depth * 20;
+    return html`
+      <a
+        class="wiki-home-item"
+        style="padding-left: ${12 + paddingLeft}px"
+        href="/wiki/${node.entry.id}/${slugify(node.entry.title)}"
+        @click=${(e: Event) => {
+          e.preventDefault();
+          navigate(
+            `/wiki/${node.entry.id}/${slugify(node.entry.title)}`,
+            null,
+            { replace: false },
+          );
+        }}
+      >
+        <span class="wiki-home-item-title">${node.entry.title}</span>
+        <span class="wiki-home-item-meta"
+          >Updated ${timeAgo(node.entry.updated_at)}</span
+        >
+      </a>
+      ${node.children.length > 0
+        ? renderHomeTree(node.children, depth + 1)
+        : null}
+    `;
+  });
 }
 
 function WikiList() {
   const [entries, setEntries] = useState<WikiEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -126,29 +90,39 @@ function WikiList() {
 
   if (entries.length === 0) {
     return html`
-      <div class="wiki-empty">
-        <h3>No wiki pages yet</h3>
-        <p>
-          Create your first wiki page to get started. Define a title and a
-          declaration (prompt) — agents will fill in the content.
-        </p>
+      <div class="wiki-home">
+        <div class="wiki-home-header">
+          <h1>Wiki</h1>
+          <p>
+            Your knowledge base wiki. Create a page to get started &mdash;
+            define a title and declaration, and agents will fill in the content.
+          </p>
+        </div>
+        <div class="wiki-empty">
+          <h3>No wiki pages yet</h3>
+          <p style="margin-bottom:16px">Create your first wiki page to get started.</p>
+          <button
+            class="wiki-btn wiki-btn-primary"
+            @click=${() => navigate('/wiki/new', null, { replace: false })}
+          >
+            Create First Page
+          </button>
+        </div>
       </div>
     `;
   }
 
   const roots = buildTree(entries);
 
-  const toggle = (id: string) => {
-    const next = new Set(collapsed);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    setCollapsed(next);
-  };
-
-  return html`<div class="wiki-list">${renderTree(roots, collapsed, toggle)}</div>`;
+  return html`
+    <div class="wiki-home">
+      <div class="wiki-home-header">
+        <h1>All Pages</h1>
+        <p>${entries.length} page${entries.length !== 1 ? 's' : ''} in this wiki</p>
+      </div>
+      <div class="wiki-home-grid">${renderHomeTree(roots, 0)}</div>
+    </div>
+  `;
 }
 
 customElements.define(

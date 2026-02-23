@@ -1,9 +1,10 @@
-// Wiki SPA entry point — defines <wiki-shell> with client-side routing
+// Wiki SPA entry point — defines <wiki-shell> with sidebar + content layout
 
-import { component, html } from '@pionjs/pion';
+import { component, html, useState } from '@pionjs/pion';
 import { useRouter, navigate, href } from '@neovici/cosmoz-router';
 
 // Side-effect imports: register child custom elements
+import './sidebar.js';
 import './views/wiki-list.js';
 import './views/wiki-detail.js';
 import './views/wiki-create.js';
@@ -12,46 +13,71 @@ import './views/wiki-edit.js';
 const routes = [
   {
     rule: href(/^\/wiki\/new$/),
-    handle: () => html`<wiki-create></wiki-create>`,
+    handle: () => ({ view: html`<wiki-create></wiki-create>`, activeId: null }),
   },
   {
     rule: href(/^\/wiki\/(?<id>[0-9a-f-]{36})\/edit$/),
     handle: ({ match }: { match: { result: RegExpMatchArray } }) => {
       const id = match.result.groups!.id;
-      return html`<wiki-edit .entryId=${id}></wiki-edit>`;
+      return {
+        view: html`<wiki-edit .entryId=${id}></wiki-edit>`,
+        activeId: id,
+      };
     },
   },
   {
     rule: href(/^\/wiki\/(?<id>[0-9a-f-]{36})(?:\/[^/]*)?$/),
     handle: ({ match }: { match: { result: RegExpMatchArray } }) => {
       const id = match.result.groups!.id;
-      return html`<wiki-detail .entryId=${id}></wiki-detail>`;
+      return {
+        view: html`<wiki-detail .entryId=${id}></wiki-detail>`,
+        activeId: id,
+      };
     },
   },
   {
     rule: href(/^\/wiki\/?$/),
-    handle: () => html`<wiki-list></wiki-list>`,
+    handle: () => ({
+      view: html`<wiki-list></wiki-list>`,
+      activeId: null,
+    }),
   },
 ];
 
 function WikiShell() {
-  const { result } = useRouter(routes);
+  const { result } = useRouter(routes as any);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const r = result as any;
+  const activeId = r?.activeId ?? null;
+  const view = r?.view ?? html`<wiki-list></wiki-list>`;
+
+  const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
+  const closeSidebar = () => setSidebarOpen(false);
 
   return html`
-    <div class="wiki-layout">
-      <div class="wiki-header">
-        <h1>Wiki</h1>
-        <div class="wiki-header-actions">
-          <a href="/" class="wiki-btn">Graph</a>
-          <button
-            class="wiki-btn wiki-btn-primary"
-            @click=${() => navigate('/wiki/new', null, { replace: false })}
-          >
-            New Page
-          </button>
-        </div>
+    <div class="wiki-shell">
+      <!-- Mobile header -->
+      <div class="wiki-mobile-header">
+        <button class="wiki-mobile-menu-btn" @click=${toggleSidebar}>
+          &#9776;
+        </button>
+        <span class="wiki-mobile-title">Wiki</span>
       </div>
-      ${result ?? html`<wiki-list></wiki-list>`}
+
+      <!-- Sidebar overlay (mobile) -->
+      <div
+        class="wiki-sidebar-overlay ${sidebarOpen ? 'visible' : ''}"
+        @click=${closeSidebar}
+      ></div>
+
+      <!-- Sidebar -->
+      <aside class="wiki-sidebar ${sidebarOpen ? 'open' : ''}">
+        <wiki-sidebar .activeId=${activeId}></wiki-sidebar>
+      </aside>
+
+      <!-- Main content -->
+      <main class="wiki-main" @click=${closeSidebar}>${view}</main>
     </div>
   `;
 }
