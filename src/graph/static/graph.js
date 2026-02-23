@@ -111,6 +111,45 @@ async function fetchEntryDetail(id) {
   }
 }
 
+async function fetchEntryHistory(id, limit = 20) {
+  try {
+    const res = await fetch(`/api/entry/${encodeURIComponent(id)}/history?limit=${limit}`);
+    const data = await res.json();
+    return data.history || [];
+  } catch (err) {
+    console.error('Failed to fetch entry history:', err);
+    return [];
+  }
+}
+
+async function fetchEntryAtVersion(id, hash) {
+  try {
+    const res = await fetch(`/api/entry/${encodeURIComponent(id)}/history/${encodeURIComponent(hash)}`);
+    const data = await res.json();
+    return data.entry || null;
+  } catch (err) {
+    console.error('Failed to fetch entry version:', err);
+    return null;
+  }
+}
+
+function timeAgo(dateString) {
+  const now = new Date();
+  const date = new Date(dateString);
+  const seconds = Math.floor((now - date) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  const years = Math.floor(months / 12);
+  return `${years}y ago`;
+}
+
 // Filter
 function applyFilters(data) {
   const typeFilter = filterType.value;
@@ -401,6 +440,18 @@ async function showSidebar(id) {
   }
 
   html += `
+    <div class="history-section" id="history-section">
+      <div class="history-toggle" onclick="toggleHistory()">
+        <span class="history-arrow">&#9654;</span>
+        <h3>History <span id="history-count" class="history-count"></span></h3>
+      </div>
+      <div class="history-list" id="history-list" style="display:none">
+        <div class="history-loading">Loading...</div>
+      </div>
+    </div>
+  `;
+
+  html += `
     <div class="meta" style="margin-top:8px">
       <span>Created: ${new Date(entry.created_at).toLocaleDateString()}</span>
       <span>Last accessed: ${new Date(entry.last_accessed_at).toLocaleDateString()}</span>
@@ -410,7 +461,104 @@ async function showSidebar(id) {
 
   sidebarContent.innerHTML = html;
   sidebar.classList.add('open');
+
+  // Fetch history asynchronously (non-blocking)
+  loadEntryHistory(id);
 }
+
+// --- History UI ---
+
+let historyExpanded = false;
+
+async function loadEntryHistory(id) {
+  const history = await fetchEntryHistory(id);
+  const countEl = document.getElementById('history-count');
+  const listEl = document.getElementById('history-list');
+
+  if (!countEl || !listEl) return;
+
+  if (history.length === 0) {
+    countEl.textContent = '';
+    listEl.innerHTML = '<div class="history-empty">No version history available</div>';
+    return;
+  }
+
+  countEl.textContent = `(${history.length})`;
+
+  let listHtml = '';
+  for (const commit of history) {
+    listHtml += `
+      <div class="history-item" onclick="showHistoricalVersion('${id}', '${commit.hash}', this)">
+        <span class="history-hash">${commit.hash.slice(0, 7)}</span>
+        <span class="history-message">${escapeHtml(commit.message)}</span>
+        <span class="history-date">${timeAgo(commit.date)}</span>
+      </div>
+    `;
+  }
+  listEl.innerHTML = listHtml;
+}
+
+window.toggleHistory = function() {
+  historyExpanded = !historyExpanded;
+  const listEl = document.getElementById('history-list');
+  const arrowEl = document.querySelector('.history-arrow');
+  if (listEl) {
+    listEl.style.display = historyExpanded ? 'block' : 'none';
+  }
+  if (arrowEl) {
+    arrowEl.style.transform = historyExpanded ? 'rotate(90deg)' : '';
+  }
+};
+
+window.showHistoricalVersion = async function(id, hash, el) {
+  // Highlight the selected history item
+  document.querySelectorAll('.history-item').forEach(item => item.classList.remove('active'));
+  if (el) el.classList.add('active');
+
+  const contentEl = sidebarContent.querySelector('.content');
+  if (!contentEl) return;
+
+  // Show loading state
+  const existingBanner = sidebarContent.querySelector('.history-version-banner');
+  if (existingBanner) existingBanner.remove();
+
+  contentEl.innerHTML = '<div class="history-loading">Loading version...</div>';
+
+  const entry = await fetchEntryAtVersion(id, hash);
+  if (!entry) {
+    contentEl.innerHTML = '<div class="history-empty">Failed to load this version</div>';
+    return;
+  }
+
+  // Insert banner above content
+  const banner = document.createElement('div');
+  banner.className = 'history-version-banner';
+  banner.innerHTML = `
+    Viewing version from ${new Date(entry.updated_at).toLocaleDateString()}
+    <button onclick="restoreCurrentVersion('${id}')">Back to current</button>
+  `;
+  contentEl.parentNode.insertBefore(banner, contentEl);
+
+  contentEl.innerHTML = marked.parse(entry.content);
+};
+
+window.restoreCurrentVersion = async function(id) {
+  // Remove banner
+  const banner = sidebarContent.querySelector('.history-version-banner');
+  if (banner) banner.remove();
+
+  // Deselect history items
+  document.querySelectorAll('.history-item').forEach(item => item.classList.remove('active'));
+
+  // Re-fetch current entry and restore content
+  const detail = await fetchEntryDetail(id);
+  if (!detail) return;
+
+  const contentEl = sidebarContent.querySelector('.content');
+  if (contentEl) {
+    contentEl.innerHTML = marked.parse(detail.entry.content);
+  }
+};
 
 // Navigate to a linked node
 window.navigateToNode = async function(id) {

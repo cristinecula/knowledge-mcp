@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { getGraphData, getKnowledgeById, getLinksForEntry, searchKnowledge } from '../db/queries.js';
 import { getEmbeddingProvider } from '../embeddings/provider.js';
 import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
+import { getEntryHistory, getEntryAtCommit } from '../sync/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = resolve(__dirname, 'static');
@@ -142,6 +143,45 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       sendError(
         res,
         `Error searching: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
+  // Entry history API — must be matched before the generic /api/entry/:id route
+  const historyMatch = pathname.match(/^\/api\/entry\/([^/]+)\/history$/);
+  if (historyMatch) {
+    const id = decodeURIComponent(historyMatch[1]);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '20', 10) || 20, 100);
+    try {
+      const history = getEntryHistory(id, limit);
+      sendJson(res, { history });
+    } catch (error) {
+      sendError(
+        res,
+        `Error fetching entry history: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
+  const historyVersionMatch = pathname.match(/^\/api\/entry\/([^/]+)\/history\/([^/]+)$/);
+  if (historyVersionMatch) {
+    const id = decodeURIComponent(historyVersionMatch[1]);
+    const hash = decodeURIComponent(historyVersionMatch[2]);
+    try {
+      const entry = getEntryAtCommit(id, hash);
+      if (!entry) {
+        sendError(res, `Version not found: ${hash}`);
+        return;
+      }
+      sendJson(res, { entry });
+    } catch (error) {
+      sendError(
+        res,
+        `Error fetching entry version: ${error instanceof Error ? error.message : String(error)}`,
         500,
       );
     }

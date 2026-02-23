@@ -22,6 +22,7 @@ import { registerLinkTool } from './tools/link.js';
 import { registerUpdateTool } from './tools/update.js';
 import { registerDeleteTool } from './tools/delete.js';
 import { registerSyncTool } from './tools/sync.js';
+import { registerHistoryTools } from './tools/history.js';
 import { existsSync } from 'node:fs';
 import {
   setSyncConfig,
@@ -240,8 +241,9 @@ async function main(): Promise<void> {
   registerUpdateTool(server);
   registerDeleteTool(server);
   registerSyncTool(server);
+  registerHistoryTools(server);
 
-  const toolCount = isSyncEnabled() ? '9 tools registered (sync enabled)' : '9 tools registered (sync disabled)';
+  const toolCount = isSyncEnabled() ? '11 tools registered (sync enabled)' : '11 tools registered (sync disabled)';
   console.error(toolCount);
 
   // Start graph visualization server

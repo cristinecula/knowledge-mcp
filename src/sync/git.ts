@@ -200,6 +200,64 @@ export function gitPull(path: string, remote = 'origin'): boolean {
   }
 }
 
+/** Commit metadata from git log. */
+export interface GitLogEntry {
+  hash: string;
+  date: string;
+  message: string;
+}
+
+/**
+ * Get the git log for a specific file.
+ * Returns an array of commits that touched the file, newest first.
+ * Returns [] if the file has no history, the repo has no commits, or on any error.
+ */
+export function gitFileLog(repoPath: string, filePath: string, limit = 20): GitLogEntry[] {
+  try {
+    const output = execFileSync(
+      'git',
+      ['log', `--pretty=format:%H|%aI|%s`, `-n`, String(limit), '--', filePath],
+      { cwd: repoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+
+    if (!output.trim()) return [];
+
+    return output
+      .trim()
+      .split('\n')
+      .map((line) => {
+        const firstPipe = line.indexOf('|');
+        const secondPipe = line.indexOf('|', firstPipe + 1);
+        if (firstPipe === -1 || secondPipe === -1) return null;
+        return {
+          hash: line.slice(0, firstPipe),
+          date: line.slice(firstPipe + 1, secondPipe),
+          message: line.slice(secondPipe + 1),
+        };
+      })
+      .filter((entry): entry is GitLogEntry => entry !== null);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get the content of a file at a specific git commit.
+ * The filePath must be relative to the repo root (e.g., "entries/fact/uuid.json").
+ * Returns the file content as a string, or null if the file/commit doesn't exist.
+ */
+export function gitShowFile(repoPath: string, commitHash: string, relativeFilePath: string): string | null {
+  try {
+    return execFileSync(
+      'git',
+      ['show', `${commitHash}:${relativeFilePath}`],
+      { cwd: repoPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** Push changes to remote. Skips if no remote. */
 export function gitPush(path: string, remote = 'origin'): boolean {
   if (!hasRemote(path, remote)) return false;
