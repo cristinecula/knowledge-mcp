@@ -462,6 +462,11 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     return;
   }
 
+  if (pathname === '/wiki-style.css') {
+    serveStatic(res, resolve(STATIC_DIR, 'wiki-style.css'));
+    return;
+  }
+
   // SPA catch-all: any /wiki* path (except /api/wiki*) serves the wiki shell
   if (pathname === '/wiki' || pathname.startsWith('/wiki/')) {
     serveStatic(res, resolve(STATIC_DIR, 'wiki.html'));
