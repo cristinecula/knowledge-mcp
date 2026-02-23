@@ -14,13 +14,14 @@ Built for teams where multiple agents work across many repositories. Store conve
 - **Knowledge graph visualization** — Built-in D3.js force-directed graph UI served on `localhost:3333`.
 - **Hierarchical scoping** — Entries can be scoped to company, project, or repo. Queries inherit upward (repo queries include project and company knowledge).
 - **Git-based team sync** — Share knowledge across a team via a git repo. JSON files are the source of truth; local SQLite acts as a personal index. Conflict detection keeps both versions and lets agents resolve naturally.
-- **9 MCP tools** — Store, query, list, reinforce, deprecate, link, update, delete, and sync knowledge.
+- **Entry version history** — When git sync is configured, inspect the full commit history of any entry and retrieve its content at any point in time.
+- **11 MCP tools** — Store, query, list, reinforce, deprecate, link, update, delete, sync knowledge, plus entry version history.
 
 ## Installation
 
 ### Prerequisites
 
-- **Node.js** 18 or later
+- **Node.js** 20 or later
 - **npm** (included with Node.js)
 - A C++ compiler toolchain for `better-sqlite3` native compilation:
   - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
@@ -54,17 +55,36 @@ knowledge-mcp --help
 
 ### Quick start
 
-1. Add to your MCP client config (see [Configuration](#configuration) for full details):
+1. Add to your MCP client config (see [Configuration](#configuration) for full details).
 
-```json
-{
-  "knowledge": {
-    "type": "local",
-    "command": ["node", "/path/to/knowledge-mcp/build/index.js"],
-    "enabled": true
-  }
-}
-```
+   **Recommended** — with git sync for team sharing and persistent history:
+
+   ```json
+   {
+     "knowledge": {
+       "type": "local",
+       "command": [
+         "node", "/path/to/knowledge-mcp/build/index.js",
+         "--sync-repo", "/path/to/shared-knowledge-repo"
+       ],
+       "enabled": true
+     }
+   }
+   ```
+
+   The sync repo can be any git repository (empty or existing). If it has a configured remote, the system will automatically push and pull changes.
+
+   **Simpler alternative** — local-only, no sync:
+
+   ```json
+   {
+     "knowledge": {
+       "type": "local",
+       "command": ["node", "/path/to/knowledge-mcp/build/index.js"],
+       "enabled": true
+     }
+   }
+   ```
 
 2. The SQLite database is automatically created at `~/.knowledge-mcp/knowledge.db` on first run.
 3. Open `http://localhost:3333` to see the knowledge graph visualization.
@@ -144,6 +164,7 @@ With semantic search enabled (local embeddings):
 | `--embedding-model <model>` | Override the default embedding model | Provider default |
 | `--sync-repo <path>` | Path to a single git repo for team knowledge sync | — |
 | `--sync-config <path>` | Path to a JSON config file for multi-repo sync | — |
+| `--sync-interval <seconds>` | Automatic sync interval in seconds (0 to disable) | `300` |
 | `--backfill-embeddings` | Generate embeddings for all existing entries on startup | — |
 | `--help` | Show help message | — |
 
@@ -212,6 +233,12 @@ Update an entry's content, title, tags, type, project, or scope. Automatically t
 
 ### `sync_knowledge`
 Manually trigger a sync with the git repo. Supports `pull` (import remote changes), `push` (export local changes), or `both`. Only available when `--sync-repo` is configured.
+
+### `get_entry_history`
+Retrieve the git commit history for a knowledge entry. Returns a list of commits (newest first) showing when the entry was created, modified, and by whom. Requires git sync to be configured.
+
+### `get_entry_at_version`
+Retrieve the full content of a knowledge entry at a specific git commit. Use after `get_entry_history` to inspect what an entry looked like at a particular point in time. Requires git sync to be configured.
 
 ## Git Sync
 
@@ -313,8 +340,8 @@ When the server is running, open `http://localhost:3333` to view the knowledge g
 
 - **Nodes** — Color-coded by knowledge type, sized by strength
 - **Edges** — Typed and labeled link relationships
-- **Sidebar** — Click a node to inspect its details
-- **Filters** — Filter by type, scope, or status
+- **Sidebar** — Click a node to inspect its details, including rendered markdown content and collapsible version history (when git sync is configured)
+- **Filters** — Filter by type, scope, status, or project (dynamic dropdown populated from your entries)
 
 ## Development
 
@@ -337,6 +364,7 @@ npm run test:watch
 ```
 src/
   index.ts              # Entry point, CLI args, tool registration
+  instructions.ts       # Built-in agent instructions for MCP clients
   types.ts              # Types, enums, constants, conversion helpers
   db/
     connection.ts       # SQLite connection (WAL mode, auto-create)
@@ -355,10 +383,14 @@ src/
     link.ts             # link_knowledge
     update.ts           # update_knowledge
     sync.ts             # sync_knowledge
+    history.ts          # get_entry_history, get_entry_at_version
   sync/
     config.ts           # Sync repo path management
     serialize.ts        # Entry/link JSON serialization
     fs.ts               # Repo file I/O (read, write, delete, list)
+    git.ts              # Git operations (add, commit, push, pull, log, show)
+    routing.ts          # Entry-to-repo routing based on scope/project
+    history.ts          # Entry version history resolution (DB → routing → git)
     merge.ts            # Conflict detection (no_change, remote_wins, local_wins, conflict)
     pull.ts             # Import remote changes, handle conflicts
     push.ts             # Export local entries/links to repo
@@ -378,6 +410,9 @@ src/
     tools.test.ts       # Tool integration tests (26 tests)
     similarity.test.ts  # Similarity/RRF math tests (12 tests)
     sync.test.ts        # Sync layer tests (32 tests)
+    e2e-sync.test.ts    # End-to-end sync tests with real git repos (58 tests)
+    e2e-helpers.ts      # E2E test infrastructure (11 helper functions)
+    history.test.ts     # Entry version history tests (17 tests)
 ```
 
 ## License
