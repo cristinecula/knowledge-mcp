@@ -152,6 +152,22 @@ function migrateSchema(db: Database.Database): void {
     db.exec(`ALTER TABLE knowledge_links ADD COLUMN synced_at TEXT`);
   }
 
+  // Migration 7: Add sync_lock table for cross-process sync coordination
+  const syncLockExists = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_lock'")
+    .get();
+
+  if (!syncLockExists) {
+    db.exec(`
+      CREATE TABLE sync_lock (
+        lock_name TEXT PRIMARY KEY,
+        holder_pid INTEGER NOT NULL,
+        acquired_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+    `);
+  }
+
   // Backfill: ensure content_updated_at is set for any rows where it's empty
   db.exec(`UPDATE knowledge SET content_updated_at = updated_at WHERE content_updated_at = ''`);
 }

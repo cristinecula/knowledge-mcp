@@ -39,6 +39,8 @@ import {
   touchedRepos,
   clearTouchedRepos,
   getRepoLinkIds,
+  tryAcquireSyncLock,
+  releaseSyncLock,
 } from '../sync/index.js';
 import { gitInit, gitCommitAll, isGitRepo } from '../sync/git.js';
 import type { EntryJSON } from '../sync/serialize.js';
@@ -1592,6 +1594,95 @@ describe('sync layer', () => {
       expect(fileContent).not.toBeNull();
       const parsed = JSON.parse(fileContent!);
       expect(parsed.content).toBe('Updated content');
+    });
+  });
+
+  describe('sync coordinator lock', () => {
+    afterEach(() => {
+      // Clean up any locks left by tests
+      const db = getDb();
+      db.prepare('DELETE FROM sync_lock').run();
+    });
+
+    it('should acquire lock when no lock exists', () => {
+      expect(tryAcquireSyncLock()).toBe(true);
+    });
+
+    it('should allow same PID to re-acquire its own lock', () => {
+      expect(tryAcquireSyncLock()).toBe(true);
+      expect(tryAcquireSyncLock()).toBe(true);
+    });
+
+    it('should block acquisition when another PID holds the lock', () => {
+      const db = getDb();
+      const now = new Date().toISOString();
+      const future = new Date(Date.now() + 60_000).toISOString();
+      // Simulate another process holding the lock — use PID 1 (init, always alive)
+      db.prepare('INSERT INTO sync_lock (lock_name, holder_pid, acquired_at, expires_at) VALUES (?, ?, ?, ?)')
+        .run('sync', 1, now, future);
+
+      expect(tryAcquireSyncLock()).toBe(false);
+    });
+
+    it('should steal lock when holder PID is dead', () => {
+      const db = getDb();
+      const now = new Date().toISOString();
+      const future = new Date(Date.now() + 60_000).toISOString();
+      // Use a PID that almost certainly doesn't exist
+      const deadPid = 2_000_000_000;
+      db.prepare('INSERT INTO sync_lock (lock_name, holder_pid, acquired_at, expires_at) VALUES (?, ?, ?, ?)')
+        .run('sync', deadPid, now, future);
+
+      expect(tryAcquireSyncLock()).toBe(true);
+
+      // Verify we now hold the lock
+      const row = db.prepare('SELECT holder_pid FROM sync_lock WHERE lock_name = ?').get('sync') as { holder_pid: number };
+      expect(row.holder_pid).toBe(process.pid);
+    });
+
+    it('should steal lock when it has expired', () => {
+      const db = getDb();
+      const past = new Date(Date.now() - 60_000).toISOString();
+      // Use PID 1 (alive) but with expired timestamp
+      db.prepare('INSERT INTO sync_lock (lock_name, holder_pid, acquired_at, expires_at) VALUES (?, ?, ?, ?)')
+        .run('sync', 1, past, past);
+
+      expect(tryAcquireSyncLock()).toBe(true);
+
+      const row = db.prepare('SELECT holder_pid FROM sync_lock WHERE lock_name = ?').get('sync') as { holder_pid: number };
+      expect(row.holder_pid).toBe(process.pid);
+    });
+
+    it('should release only our own lock', () => {
+      const db = getDb();
+      const now = new Date().toISOString();
+      const future = new Date(Date.now() + 60_000).toISOString();
+      // Another process holds the lock
+      db.prepare('INSERT INTO sync_lock (lock_name, holder_pid, acquired_at, expires_at) VALUES (?, ?, ?, ?)')
+        .run('sync', 1, now, future);
+
+      // Releasing should not affect another process's lock
+      releaseSyncLock();
+
+      const row = db.prepare('SELECT holder_pid FROM sync_lock WHERE lock_name = ?').get('sync') as { holder_pid: number } | undefined;
+      expect(row).toBeDefined();
+      expect(row!.holder_pid).toBe(1);
+    });
+
+    it('should release our lock successfully', () => {
+      expect(tryAcquireSyncLock()).toBe(true);
+
+      releaseSyncLock();
+
+      const db = getDb();
+      const row = db.prepare('SELECT * FROM sync_lock WHERE lock_name = ?').get('sync');
+      expect(row).toBeUndefined();
+    });
+
+    it('should allow acquisition after release', () => {
+      expect(tryAcquireSyncLock()).toBe(true);
+      releaseSyncLock();
+      expect(tryAcquireSyncLock()).toBe(true);
     });
   });
 });

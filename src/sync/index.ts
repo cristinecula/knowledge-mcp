@@ -6,7 +6,7 @@
  * Content syncs; strength/access_count/last_accessed_at stay local.
  */
 
-export { setSyncConfig, getSyncConfig, isSyncEnabled, isSyncInProgress, setSyncInProgress, SYNC_SCHEMA_VERSION } from './config.js';
+export { setSyncConfig, getSyncConfig, isSyncEnabled, isSyncInProgress, setSyncInProgress, tryAcquireSyncLock, releaseSyncLock, SYNC_SCHEMA_VERSION } from './config.js';
 export type { SyncConfig, SyncRepoConfig } from './routing.js';
 export { loadSyncConfig, resolveRepo } from './routing.js';
 export { entryToJSON, parseEntryJSON, linkToJSON, parseLinkJSON } from './serialize.js';

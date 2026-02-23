@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getSyncConfig, isSyncEnabled, isSyncInProgress, setSyncInProgress, pull, push } from '../sync/index.js';
+import { getSyncConfig, isSyncEnabled, isSyncInProgress, setSyncInProgress, tryAcquireSyncLock, releaseSyncLock, pull, push } from '../sync/index.js';
 
 export function registerSyncTool(server: McpServer): void {
   server.registerTool(
@@ -40,7 +40,19 @@ export function registerSyncTool(server: McpServer): void {
             content: [
               {
                 type: 'text' as const,
-                text: 'A sync operation is already in progress. Try again shortly.',
+                text: 'A sync operation is already in progress in this process. Try again shortly.',
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        if (!tryAcquireSyncLock()) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: 'Another process is currently syncing. Try again shortly.',
               },
             ],
             isError: true,
@@ -89,6 +101,7 @@ export function registerSyncTool(server: McpServer): void {
           };
         } finally {
           setSyncInProgress(false);
+          releaseSyncLock();
         }
       } catch (error) {
         return {

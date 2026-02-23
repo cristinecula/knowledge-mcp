@@ -29,6 +29,8 @@ import {
   isSyncEnabled,
   isSyncInProgress,
   setSyncInProgress,
+  tryAcquireSyncLock,
+  releaseSyncLock,
   pull,
   push,
   loadSyncConfig,
@@ -273,7 +275,8 @@ async function main(): Promise<void> {
   let syncInterval: ReturnType<typeof setInterval> | null = null;
   if (config && syncIntervalSec > 0) {
     syncInterval = setInterval(async () => {
-      if (isSyncInProgress()) return;
+      if (isSyncInProgress()) return;       // in-process re-entrancy guard
+      if (!tryAcquireSyncLock()) return;     // cross-process coordinator lock
       setSyncInProgress(true);
       try {
         const pullResult = await pull(config);
@@ -290,6 +293,7 @@ async function main(): Promise<void> {
         console.error(`Periodic sync error: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
         setSyncInProgress(false);
+        releaseSyncLock();
       }
     }, syncIntervalSec * 1000);
 
