@@ -545,7 +545,8 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
             (r: Record<string, unknown>) => r.id === conflictId,
           );
           expect(conflictEntry).toBeTruthy();
-          expect(conflictEntry!.status).toBe('needs_revalidation');
+          // Conflict entries now have status 'active' with high inaccuracy instead of 'needs_revalidation'
+          expect(conflictEntry!.status).toBe('active');
         } finally {
           await destroyAgent(agentB);
         }

@@ -183,7 +183,7 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
       <div
         class="wiki-detail-meta"
         .innerHTML=${`
-          ${statusBadge(entry.status)}
+          ${statusBadge(entry.status, entry.inaccuracy)}
           ${entry.project ? `<span>${escapeHtml(entry.project)}</span>` : ''}
           <span>${entry.scope}</span>
           <span>Source: ${escapeHtml(entry.source)}</span>

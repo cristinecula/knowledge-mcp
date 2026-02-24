@@ -27,7 +27,9 @@ accessed stays strong; unused knowledge naturally fades.
 
 - Query the knowledge base for entries relevant to the current project or task.
   This gives you context from previous sessions without needing to re-discover things.
-- Check for entries with \`needs_revalidation\` status that may need review.
+- Check for entries with \`needs_revalidation: true\` that may need review.
+  These are entries whose inaccuracy score has risen above the threshold (1.0),
+  typically because source knowledge they depend on was updated.
 - If git sync is configured, use \`get_entry_history\` on key entries to understand
   recent changes made by other team members.
 
@@ -55,6 +57,26 @@ accessed stays strong; unused knowledge naturally fades.
 - If an entry needs updating rather than deprecating, use \`update_knowledge\`.
 - Use \`delete_knowledge\` only for entries created by mistake.
 
+## Inaccuracy tracking
+
+Each entry has a continuous **inaccuracy** score (default 0.0). When an entry is updated,
+inaccuracy automatically propagates to dependent entries through the knowledge graph:
+
+- **Direct dependents** (entries linked via \`derived\`, \`depends\`, \`elaborates\`, etc.) receive
+  an inaccuracy bump proportional to the size of the change and the link type weight.
+- **Distant dependents** receive diminishing bumps (0.5x decay per hop).
+- When an entry's inaccuracy reaches the threshold (1.0), its \`needs_revalidation\` boolean
+  becomes \`true\` in all tool responses.
+
+**What this means for you:**
+- After updating a foundational entry, check the cascade report in the response to see
+  which entries were affected and whether any crossed the threshold.
+- When you see \`needs_revalidation: true\` on an entry, review it against its source
+  knowledge and either \`update_knowledge\` (resets inaccuracy to 0) or \`reinforce_knowledge\`
+  (also resets inaccuracy) if the content is still accurate.
+- Use \`query_knowledge\` with \`above_threshold: true\` to find all entries needing review
+  within a topic area.
+
 ## Wiki entries
 
 - Wiki entries (\`type: "wiki"\`) are curated documentation pages that are exempt from memory decay.
@@ -70,7 +92,7 @@ accessed stays strong; unused knowledge naturally fades.
   Always resolve these warnings before considering the task complete.
 - Entries may have a **flag_reason** — a human-provided note explaining why the page was flagged as
   inaccurate. When you see \`flag_reason\` in query or list results, use it as guidance for what to fix.
-  The flag is automatically cleared when you \`update_knowledge\` on a \`needs_revalidation\` entry.
+  The flag is automatically cleared when you \`update_knowledge\` on the entry.
 
 ## Understanding entry history
 

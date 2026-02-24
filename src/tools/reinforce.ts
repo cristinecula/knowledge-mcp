@@ -3,11 +3,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   getKnowledgeById,
   recordAccess,
-  updateStatus,
+  resetInaccuracy,
   getLinksForEntry,
   getLinkedEntries,
 } from '../db/queries.js';
-import { REINFORCE_ACCESS_BOOST } from '../types.js';
+import { REINFORCE_ACCESS_BOOST, INACCURACY_THRESHOLD } from '../types.js';
 import { calculateNetworkStrength } from '../memory/strength.js';
 
 export function registerReinforceTool(server: McpServer): void {
@@ -17,7 +17,7 @@ export function registerReinforceTool(server: McpServer): void {
       description:
         'Explicitly reinforce a knowledge entry, significantly boosting its memory strength. ' +
         'Use this when you confirm that a piece of knowledge is still accurate and useful. ' +
-        'This also clears any "needs_revalidation" flag on the entry. ' +
+        'This also resets the entry\'s inaccuracy score to 0, clearing any revalidation need. ' +
         'Reinforcement gives a +3 access boost (3x stronger than a normal query access).',
       inputSchema: {
         id: z.string().describe('ID of the knowledge entry to reinforce'),
@@ -41,9 +41,10 @@ export function registerReinforceTool(server: McpServer): void {
         // Boost access count
         recordAccess(id, REINFORCE_ACCESS_BOOST);
 
-        // Clear needs_revalidation status if applicable
-        if (entry.status === 'needs_revalidation') {
-          updateStatus(id, 'active');
+        // Reset inaccuracy (reinforcing confirms entry is accurate)
+        const previousInaccuracy = entry.inaccuracy;
+        if (previousInaccuracy > 0) {
+          resetInaccuracy(id);
         }
 
         // Re-fetch and calculate new strength
@@ -63,8 +64,10 @@ export function registerReinforceTool(server: McpServer): void {
                   previous_strength: Math.round(entry.strength * 1000) / 1000,
                   new_strength: Math.round(newStrength * 1000) / 1000,
                   access_count: updated.access_count,
-                  status: updated.status === 'needs_revalidation' ? 'active' : updated.status,
-                  revalidation_cleared: entry.status === 'needs_revalidation',
+                  status: updated.status,
+                  previous_inaccuracy: Math.round(previousInaccuracy * 1000) / 1000,
+                  new_inaccuracy: 0,
+                  revalidation_cleared: previousInaccuracy >= INACCURACY_THRESHOLD,
                 },
                 null,
                 2,

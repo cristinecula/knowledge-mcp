@@ -2,9 +2,10 @@
 
 const STATUS_LABELS: Record<string, { label: string; cssClass: string }> = {
   active: { label: 'Active', cssClass: 'status-active' },
-  needs_revalidation: { label: 'Pending', cssClass: 'status-needs_revalidation' },
   deprecated: { label: 'Deprecated', cssClass: 'status-deprecated' },
 };
+
+const INACCURACY_THRESHOLD = 1.0;
 
 export function escapeHtml(text: string): string {
   return text
@@ -37,7 +38,11 @@ export function slugify(text: string): string {
     .slice(0, 80);
 }
 
-export function statusBadge(status: string): string {
+export function statusBadge(status: string, inaccuracy?: number): string {
   const s = STATUS_LABELS[status] || STATUS_LABELS.active;
-  return `<span class="wiki-card-status ${s.cssClass}">${s.label}</span>`;
+  let badge = `<span class="wiki-card-status ${s.cssClass}">${s.label}</span>`;
+  if ((inaccuracy ?? 0) >= INACCURACY_THRESHOLD) {
+    badge += ` <span class="wiki-card-status status-needs_revalidation">Needs Revalidation</span>`;
+  }
+  return badge;
 }

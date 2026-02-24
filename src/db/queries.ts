@@ -11,6 +11,11 @@ import {
   rowToLink,
   type KnowledgeEntry,
   type KnowledgeLink,
+  INACCURACY_THRESHOLD,
+  INACCURACY_HOP_DECAY,
+  INACCURACY_CAP,
+  INACCURACY_FLOOR,
+  INACCURACY_LINK_WEIGHTS,
 } from '../types.js';
 
 // === Knowledge CRUD ===
@@ -160,15 +165,15 @@ export function deprecateKnowledge(id: string, reason?: string): KnowledgeEntry 
 
 /**
  * Flag a knowledge entry for revalidation (human "flag as inaccurate").
- * Sets status to 'needs_revalidation' and optionally stores the reason.
+ * Sets inaccuracy to the threshold value and optionally stores the reason.
  * Returns the updated entry, or null if not found.
  */
 export function flagForRevalidation(id: string, reason?: string): KnowledgeEntry | null {
   const db = getDb();
   const now = new Date().toISOString();
   const result = db.prepare(
-    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ?, flag_reason = ?, version = version + 1 WHERE id = ?',
-  ).run('needs_revalidation', now, now, reason ?? null, id);
+    'UPDATE knowledge SET inaccuracy = ?, updated_at = ?, flag_reason = ?, version = version + 1 WHERE id = ?',
+  ).run(INACCURACY_THRESHOLD, now, reason ?? null, id);
   if (result.changes === 0) return null;
   return getKnowledgeById(id);
 }
@@ -219,6 +224,7 @@ export interface SearchParams {
   scope?: Scope;
   includeWeak?: boolean;
   status?: string;
+  aboveThreshold?: boolean;
   sortBy?: 'strength' | 'recent' | 'created';
   limit?: number;
   offset?: number;
@@ -287,19 +293,27 @@ export function searchKnowledge(params: SearchParams): KnowledgeEntry[] {
     if (params.status === 'weak') {
       sql += ' AND k.status = ? AND k.strength >= 0.1 AND k.strength < 0.5';
       bindings.push('active');
+    } else if (params.status === 'needs_revalidation') {
+      // Virtual filter: active entries with inaccuracy above threshold
+      sql += ' AND k.status = ? AND k.inaccuracy >= ?';
+      bindings.push('active', INACCURACY_THRESHOLD);
     } else {
       sql += ' AND k.status = ?';
       bindings.push(params.status);
     }
   } else if (params.status !== 'all') {
-    // By default, show active + needs_revalidation entries
-    const includeStatuses = ['active', 'needs_revalidation'];
-    sql += ` AND k.status IN (${includeStatuses.map(() => '?').join(',')})`;
-    bindings.push(...includeStatuses);
+    // By default, show active entries
+    sql += ` AND k.status = 'active'`;
 
     if (!params.includeWeak) {
       sql += ` AND k.strength >= 0.5`;
     }
+  }
+
+  // Above-threshold filter (can combine with other filters)
+  if (params.aboveThreshold) {
+    sql += ' AND k.inaccuracy >= ?';
+    bindings.push(INACCURACY_THRESHOLD);
   }
 
   // Sort
@@ -376,18 +390,25 @@ export function countKnowledge(params: SearchParams): number {
     if (params.status === 'weak') {
       sql += ' AND k.status = ? AND k.strength >= 0.1 AND k.strength < 0.5';
       bindings.push('active');
+    } else if (params.status === 'needs_revalidation') {
+      sql += ' AND k.status = ? AND k.inaccuracy >= ?';
+      bindings.push('active', INACCURACY_THRESHOLD);
     } else {
       sql += ' AND k.status = ?';
       bindings.push(params.status);
     }
   } else if (params.status !== 'all') {
-    const includeStatuses = ['active', 'needs_revalidation'];
-    sql += ` AND k.status IN (${includeStatuses.map(() => '?').join(',')})`;
-    bindings.push(...includeStatuses);
+    sql += ` AND k.status = 'active'`;
 
     if (!params.includeWeak) {
       sql += ` AND k.strength >= 0.5`;
     }
+  }
+
+  // Above-threshold filter
+  if (params.aboveThreshold) {
+    sql += ' AND k.inaccuracy >= ?';
+    bindings.push(INACCURACY_THRESHOLD);
   }
 
   const row = db.prepare(sql).get(...bindings) as { total: number };
@@ -566,7 +587,7 @@ export function deleteLink(id: string): boolean {
 export function getAllActiveEntries(): KnowledgeEntry[] {
   const db = getDb();
   const rows = db
-    .prepare("SELECT * FROM knowledge WHERE status IN ('active', 'needs_revalidation')")
+    .prepare("SELECT * FROM knowledge WHERE status = 'active'")
     .all() as KnowledgeRow[];
   return rows.map(rowToEntry);
 }
@@ -637,6 +658,7 @@ export interface GraphData {
     project: string | null;
     strength: number;
     status: string;
+    inaccuracy: number;
     access_count: number;
     tags: string[];
     created_at: string;
@@ -673,6 +695,7 @@ export function getGraphData(): GraphData {
       project: e.project,
       strength: e.strength,
       status: e.status,
+      inaccuracy: e.inaccuracy ?? 0,
       access_count: e.access_count,
       tags: JSON.parse(e.tags),
       created_at: e.created_at,
@@ -733,6 +756,7 @@ export interface ImportKnowledgeParams {
   flag_reason?: string | null;
   declaration?: string | null;
   parent_page_id?: string | null;
+  inaccuracy?: number;
   created_at: string;
   version?: number;
 }
@@ -743,8 +767,8 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
   const version = params.version ?? 1;
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, flag_reason, declaration, parent_page_id, version, synced_version)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, flag_reason, declaration, parent_page_id, inaccuracy, version, synced_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -766,6 +790,7 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
     params.flag_reason ?? null,
     params.declaration ?? null,
     params.parent_page_id ?? null,
+    params.inaccuracy ?? 0,
     version,
     version,             // synced_version = version for imports
   );
@@ -829,6 +854,7 @@ export function updateKnowledgeContent(
     flag_reason?: string | null;
     declaration?: string | null;
     parent_page_id?: string | null;
+    inaccuracy?: number;
     version?: number;
   },
 ): KnowledgeEntry | null {
@@ -891,6 +917,10 @@ export function updateKnowledgeContent(
     sets.push('parent_page_id = ?');
     values.push(fields.parent_page_id);
   }
+  if (fields.inaccuracy !== undefined) {
+    sets.push('inaccuracy = ?');
+    values.push(fields.inaccuracy);
+  }
 
   values.push(id);
 
@@ -899,4 +929,169 @@ export function updateKnowledgeContent(
   );
 
   return getKnowledgeById(id);
+}
+
+// === Inaccuracy Propagation ===
+
+/**
+ * Compute a diff factor between old and new content.
+ * Uses prefix/suffix matching for a fast estimate of how much changed.
+ * Returns a value clamped to [0.1, 1.0], or 0 if nothing changed.
+ */
+export function computeDiffFactor(
+  oldEntry: { title: string; content: string; tags: string[] },
+  newFields: { title?: string; content?: string; tags?: string[] },
+): number {
+  // Build combined strings for comparison
+  const oldStr = oldEntry.title + '\n' + oldEntry.content + '\n' + oldEntry.tags.join(',');
+  const newStr =
+    (newFields.title ?? oldEntry.title) +
+    '\n' +
+    (newFields.content ?? oldEntry.content) +
+    '\n' +
+    (newFields.tags ?? oldEntry.tags).join(',');
+
+  if (oldStr === newStr) return 0;
+
+  const oldLen = oldStr.length;
+  const newLen = newStr.length;
+  const minLen = Math.min(oldLen, newLen);
+
+  // Find common prefix length
+  let prefixLen = 0;
+  while (prefixLen < minLen && oldStr[prefixLen] === newStr[prefixLen]) {
+    prefixLen++;
+  }
+
+  // Find common suffix length (not overlapping with prefix)
+  let suffixLen = 0;
+  while (
+    suffixLen < minLen - prefixLen &&
+    oldStr[oldLen - 1 - suffixLen] === newStr[newLen - 1 - suffixLen]
+  ) {
+    suffixLen++;
+  }
+
+  const unchangedChars = prefixLen + suffixLen;
+  const maxLen = Math.max(oldLen, newLen, 1);
+  const changedChars = maxLen - unchangedChars;
+  const ratio = changedChars / maxLen;
+
+  // Clamp to [0.1, 1.0] — even small changes get a minimum bump
+  return Math.max(0.1, Math.min(1.0, ratio));
+}
+
+/**
+ * Reset inaccuracy to 0 for an entry.
+ * Used when an entry is reinforced or its content is updated.
+ */
+export function resetInaccuracy(id: string): void {
+  const db = getDb();
+  db.prepare('UPDATE knowledge SET inaccuracy = 0.0 WHERE id = ?').run(id);
+}
+
+/**
+ * Set inaccuracy to a specific value for an entry.
+ * Caps at INACCURACY_CAP to prevent unbounded growth.
+ */
+export function setInaccuracy(id: string, value: number): void {
+  const db = getDb();
+  const capped = Math.min(value, INACCURACY_CAP);
+  db.prepare('UPDATE knowledge SET inaccuracy = ? WHERE id = ?').run(capped, id);
+}
+
+/**
+ * Propagate inaccuracy through the knowledge graph via BFS.
+ *
+ * When an entry is updated, linked entries accumulate inaccuracy based on:
+ * - The diff factor (how much the source changed)
+ * - Link type weights (how strongly linked entries are affected)
+ * - Hop decay (0.5 per hop — distant entries get smaller bumps)
+ *
+ * Direction: follows incoming links. If W→F (W derived from F),
+ * updating F propagates to W.
+ *
+ * Returns an array of { id, previousInaccuracy, newInaccuracy } for all bumped entries.
+ */
+export interface InaccuracyBump {
+  id: string;
+  previousInaccuracy: number;
+  newInaccuracy: number;
+}
+
+export function propagateInaccuracy(
+  updatedEntryId: string,
+  diffFactor: number,
+): InaccuracyBump[] {
+  if (diffFactor <= 0) return [];
+
+  const db = getDb();
+  const bumps: InaccuracyBump[] = [];
+  const visited = new Set<string>([updatedEntryId]);
+
+  // BFS queue: [entryId, bumpToApplyToItsIncomingNeighbors]
+  const queue: Array<{ entryId: string; outgoingBump: number }> = [
+    { entryId: updatedEntryId, outgoingBump: diffFactor },
+  ];
+
+  // Prepare statements for performance
+  const getIncoming = db.prepare(
+    'SELECT * FROM knowledge_links WHERE target_id = ?',
+  );
+  const getEntry = db.prepare(
+    'SELECT id, inaccuracy, status FROM knowledge WHERE id = ?',
+  );
+  const updateInaccuracyStmt = db.prepare(
+    'UPDATE knowledge SET inaccuracy = ? WHERE id = ?',
+  );
+
+  while (queue.length > 0) {
+    const { entryId, outgoingBump } = queue.shift()!;
+
+    // Find entries that point TO this entry (incoming links)
+    const incomingLinks = getIncoming.all(entryId) as KnowledgeLinkRow[];
+
+    for (const link of incomingLinks) {
+      const neighborId = link.source_id;
+      const linkWeight = INACCURACY_LINK_WEIGHTS[link.link_type as LinkType] ?? 0;
+      if (linkWeight === 0) continue;
+
+      const bump = outgoingBump * linkWeight;
+      if (bump < INACCURACY_FLOOR) continue;
+
+      // Get current inaccuracy
+      const row = getEntry.get(neighborId) as { id: string; inaccuracy: number; status: string } | undefined;
+      if (!row) continue;
+
+      // Skip deprecated entries — they don't need inaccuracy tracking
+      if (row.status === 'deprecated') continue;
+
+      const previousInaccuracy = row.inaccuracy ?? 0;
+      const newInaccuracy = Math.min(previousInaccuracy + bump, INACCURACY_CAP);
+
+      // Only update if there's a meaningful change
+      if (newInaccuracy > previousInaccuracy + 0.0001) {
+        updateInaccuracyStmt.run(newInaccuracy, neighborId);
+
+        // Record bump (aggregate if we've already bumped this entry)
+        const existing = bumps.find((b) => b.id === neighborId);
+        if (existing) {
+          existing.newInaccuracy = newInaccuracy;
+        } else {
+          bumps.push({ id: neighborId, previousInaccuracy, newInaccuracy });
+        }
+      }
+
+      // Continue BFS if not visited (apply hop decay)
+      if (!visited.has(neighborId)) {
+        visited.add(neighborId);
+        const nextBump = bump * INACCURACY_HOP_DECAY;
+        if (nextBump >= INACCURACY_FLOOR) {
+          queue.push({ entryId: neighborId, outgoingBump: nextBump });
+        }
+      }
+    }
+  }
+
+  return bumps;
 }

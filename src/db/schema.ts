@@ -201,6 +201,16 @@ function migrateSchema(db: Database.Database): void {
     db.exec(`ALTER TABLE knowledge ADD COLUMN flag_reason TEXT`);
   }
 
+  // Migration 12: Add inaccuracy column and remove needs_revalidation status.
+  // Inaccuracy is a continuous score (0.0 = accurate, >= 1.0 = needs revalidation).
+  // Existing needs_revalidation entries get inaccuracy = 1.0 and status = 'active'.
+  if (!columnNames.has('inaccuracy')) {
+    db.exec(`
+      ALTER TABLE knowledge ADD COLUMN inaccuracy REAL NOT NULL DEFAULT 0.0;
+      UPDATE knowledge SET inaccuracy = 1.0, status = 'active' WHERE status = 'needs_revalidation';
+    `);
+  }
+
   // Backfill: ensure content_updated_at is set for any rows where it's empty.
   // Only run if there are actually rows to fix (avoids full-table scan on every startup).
   const needsBackfill = db.prepare(

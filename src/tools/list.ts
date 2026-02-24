@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { KNOWLEDGE_TYPES, SCOPES } from '../types.js';
+import { KNOWLEDGE_TYPES, SCOPES, INACCURACY_THRESHOLD } from '../types.js';
 import { listKnowledge, countKnowledge, getLinksForEntries } from '../db/queries.js';
 
 export function registerListTool(server: McpServer): void {
@@ -18,7 +18,7 @@ export function registerListTool(server: McpServer): void {
         status: z
           .enum(['active', 'deprecated', 'needs_revalidation', 'all'])
           .optional()
-          .describe('Filter by status (default: active + needs_revalidation)'),
+          .describe('Filter by status. "needs_revalidation" returns active entries with inaccuracy above threshold. (default: active)'),
         sort_by: z
           .enum(['strength', 'recent', 'created'])
           .optional()
@@ -100,6 +100,8 @@ export function registerListTool(server: McpServer): void {
             access_count: entry.access_count,
             created_at: entry.created_at,
             last_accessed_at: entry.last_accessed_at,
+            needs_revalidation: entry.inaccuracy >= INACCURACY_THRESHOLD,
+            inaccuracy: Math.round(entry.inaccuracy * 1000) / 1000,
           };
           if (entry.declaration) {
             result.declaration = entry.declaration;
@@ -118,7 +120,7 @@ export function registerListTool(server: McpServer): void {
           total,
           offset: effectiveOffset,
           has_more: (effectiveOffset + results.length) < total,
-          filter: { type, project, scope, status: status ?? 'active+needs_revalidation', sort_by },
+          filter: { type, project, scope, status: status ?? 'active', sort_by },
           results,
         };
         if (warnings.length > 0) {

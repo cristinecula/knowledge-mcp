@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getKnowledgeById, recordAccess, getLinksForEntry } from '../db/queries.js';
+import { INACCURACY_THRESHOLD } from '../types.js';
 
 export function registerGetTool(server: McpServer): void {
   server.registerTool(
@@ -48,7 +49,8 @@ export function registerGetTool(server: McpServer): void {
           status: entry.status,
           access_count: entry.access_count + 1,
           last_accessed_at: new Date().toISOString(),
-          needs_revalidation: entry.status === 'needs_revalidation',
+          needs_revalidation: entry.inaccuracy >= INACCURACY_THRESHOLD,
+          inaccuracy: Math.round(entry.inaccuracy * 1000) / 1000,
           link_count: links.length,
           links: links.map((l) => ({
             link_id: l.id,

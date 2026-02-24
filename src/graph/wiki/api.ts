@@ -14,6 +14,7 @@ export interface WikiEntry {
   flag_reason: string | null;
   parent_page_id: string | null;
   strength: number;
+  inaccuracy: number;
   access_count: number;
   created_at: string;
   updated_at: string;

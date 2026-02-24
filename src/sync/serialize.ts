@@ -46,6 +46,7 @@ export interface EntryJSON {
   flag_reason?: string | null;
   declaration?: string | null;
   parent_page_id?: string | null;
+  inaccuracy?: number;
   created_at: string;
   version: number;
 }
@@ -98,6 +99,11 @@ export function entryToJSON(entry: KnowledgeEntry): EntryJSON {
   // Only include parent_page_id when it has a value (keep JSON clean)
   if (entry.parent_page_id) {
     json.parent_page_id = entry.parent_page_id;
+  }
+
+  // Only include inaccuracy when non-zero (keep JSON clean)
+  if (entry.inaccuracy > 0) {
+    json.inaccuracy = Math.round(entry.inaccuracy * 1000) / 1000;
   }
 
   return json;
@@ -188,6 +194,11 @@ export function parseEntryJSON(data: unknown): EntryJSON {
     ? obj.version
     : 1;
 
+  // Inaccuracy must be a non-negative number (default to 0 for backward compat)
+  const inaccuracy = typeof obj.inaccuracy === 'number' && obj.inaccuracy >= 0
+    ? obj.inaccuracy
+    : 0;
+
   const result: EntryJSON = {
     id: obj.id,
     type: obj.type as KnowledgeType,
@@ -220,6 +231,11 @@ export function parseEntryJSON(data: unknown): EntryJSON {
   // Only include parent_page_id when it has a value
   if (parent_page_id) {
     result.parent_page_id = parent_page_id;
+  }
+
+  // Only include inaccuracy when non-zero
+  if (inaccuracy > 0) {
+    result.inaccuracy = inaccuracy;
   }
 
   return result;

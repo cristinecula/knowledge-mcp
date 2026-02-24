@@ -764,8 +764,9 @@ describe('sync layer', () => {
       expect(conflict).toBeTruthy();
       expect(conflict!.title).toBe('[Sync Conflict] Local Version');
       expect(conflict!.content).toBe('Local content');
-      // Conflict copy gets needs_revalidation status so agents know to resolve it
-      expect(conflict!.status).toBe('needs_revalidation');
+      // Conflict copy gets high inaccuracy so agents know to resolve it
+      expect(conflict!.status).toBe('active');
+      expect(conflict!.inaccuracy).toBeGreaterThanOrEqual(1.0);
       expect(conflict!.source).toBe('sync:conflict');
 
       // 7. Should have a conflicts_with link from conflict copy → canonical
@@ -1543,7 +1544,8 @@ describe('sync layer', () => {
 
       const json = entryToJSON(flagged!);
       expect(json.flag_reason).toBe('Statistics are outdated');
-      expect(json.status).toBe('needs_revalidation');
+      expect(json.status).toBe('active');
+      expect(json.inaccuracy).toBeGreaterThanOrEqual(1.0);
     });
 
     it('should omit flag_reason in entryToJSON when null', () => {
@@ -1563,7 +1565,8 @@ describe('sync layer', () => {
         project: null,
         scope: 'company',
         source: 'agent',
-        status: 'needs_revalidation',
+        status: 'active',
+        inaccuracy: 1.0,
         flag_reason: 'Numbers are wrong',
         created_at: new Date().toISOString(),
         version: 1,
@@ -1571,7 +1574,8 @@ describe('sync layer', () => {
 
       const parsed = parseEntryJSON(raw);
       expect(parsed.flag_reason).toBe('Numbers are wrong');
-      expect(parsed.status).toBe('needs_revalidation');
+      expect(parsed.status).toBe('active');
+      expect(parsed.inaccuracy).toBeGreaterThanOrEqual(1.0);
     });
 
     it('should handle missing flag_reason in parsed JSON', () => {
@@ -1601,7 +1605,8 @@ describe('sync layer', () => {
       const parsed = parseEntryJSON(json);
 
       expect(parsed.flag_reason).toBe('X was changed, numbers stale');
-      expect(parsed.status).toBe('needs_revalidation');
+      expect(parsed.status).toBe('active');
+      expect(parsed.inaccuracy).toBeGreaterThanOrEqual(1.0);
     });
 
     it('should write and read flag_reason through file sync', () => {
@@ -1616,7 +1621,8 @@ describe('sync layer', () => {
       const filePath = join(repoPath, 'entries', 'wiki', `${entry.id}.json`);
       const fileContent = JSON.parse(readFileSync(filePath, 'utf-8'));
       expect(fileContent.flag_reason).toBe('Needs review');
-      expect(fileContent.status).toBe('needs_revalidation');
+      expect(fileContent.status).toBe('active');
+      expect(fileContent.inaccuracy).toBeGreaterThanOrEqual(1.0);
     });
 
     it('should import flag_reason during pull', async () => {
@@ -1633,7 +1639,8 @@ describe('sync layer', () => {
         project: null,
         scope: 'company',
         source: 'agent',
-        status: 'needs_revalidation',
+        status: 'active',
+        inaccuracy: 1.0,
         flag_reason: 'User reported incorrect data',
         created_at: '2025-01-01T00:00:00.000Z',
         version: 1,
@@ -1651,7 +1658,8 @@ describe('sync layer', () => {
 
       const imported = getKnowledgeById(entryId);
       expect(imported).not.toBeNull();
-      expect(imported!.status).toBe('needs_revalidation');
+      expect(imported!.status).toBe('active');
+      expect(imported!.inaccuracy).toBeGreaterThanOrEqual(1.0);
       expect(imported!.flag_reason).toBe('User reported incorrect data');
     });
   });

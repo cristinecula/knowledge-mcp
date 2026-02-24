@@ -162,11 +162,12 @@ describe('Wiki API — POST /api/wiki', () => {
     expect(data.error).toContain('Parent must be a wiki page');
   });
 
-  it('should mark created entry as needs_revalidation', async () => {
+  it('should mark created entry with high inaccuracy', async () => {
     const resp = await request('POST', '/api/wiki', { title: 'Marked Page' });
     expect(resp.statusCode).toBe(201);
-    const data = resp.json() as { entry: { id: string; status: string } };
-    expect(data.entry.status).toBe('needs_revalidation');
+    const data = resp.json() as { entry: { id: string; status: string; inaccuracy: number } };
+    expect(data.entry.status).toBe('active');
+    expect(data.entry.inaccuracy).toBeGreaterThanOrEqual(1.0);
   });
 
   it('should default to company scope', async () => {
@@ -442,9 +443,10 @@ describe('Wiki API — POST /api/wiki/:id/flag', () => {
     const resp = await request('POST', `/api/wiki/${entry.id}/flag`);
     expect(resp.statusCode).toBe(200);
 
-    const data = resp.json() as { entry: { id: string; status: string } };
+    const data = resp.json() as { entry: { id: string; status: string; inaccuracy: number } };
     expect(data.entry.id).toBe(entry.id);
-    expect(data.entry.status).toBe('needs_revalidation');
+    expect(data.entry.status).toBe('active');
+    expect(data.entry.inaccuracy).toBeGreaterThanOrEqual(1.0);
   });
 
   it('should flag with a reason', async () => {
@@ -455,8 +457,9 @@ describe('Wiki API — POST /api/wiki/:id/flag', () => {
     });
     expect(resp.statusCode).toBe(200);
 
-    const data = resp.json() as { entry: { id: string; status: string; flag_reason: string } };
-    expect(data.entry.status).toBe('needs_revalidation');
+    const data = resp.json() as { entry: { id: string; status: string; inaccuracy: number; flag_reason: string } };
+    expect(data.entry.status).toBe('active');
+    expect(data.entry.inaccuracy).toBeGreaterThanOrEqual(1.0);
     expect(data.entry.flag_reason).toBe('Statistics are incorrect');
   });
 
@@ -467,7 +470,8 @@ describe('Wiki API — POST /api/wiki/:id/flag', () => {
     expect(resp.statusCode).toBe(200);
 
     const updated = getKnowledgeById(entry.id)!;
-    expect(updated.status).toBe('needs_revalidation');
+    expect(updated.status).toBe('active');
+    expect(updated.inaccuracy).toBeGreaterThanOrEqual(1.0);
     expect(updated.flag_reason).toBeNull();
   });
 

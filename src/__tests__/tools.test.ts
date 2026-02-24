@@ -29,9 +29,12 @@ import {
   getEmbedding,
   flagForRevalidation,
   updateKnowledgeContent,
+  setInaccuracy,
+  resetInaccuracy,
+  propagateInaccuracy,
 } from '../db/queries.js';
 import { calculateNetworkStrength } from '../memory/strength.js';
-import { REINFORCE_ACCESS_BOOST, REVALIDATION_LINK_TYPES } from '../types.js';
+import { REINFORCE_ACCESS_BOOST, REVALIDATION_LINK_TYPES, INACCURACY_THRESHOLD } from '../types.js';
 
 beforeEach(() => {
   setupTestDb();
@@ -166,19 +169,17 @@ describe('reinforce workflow', () => {
     expect(REINFORCE_ACCESS_BOOST).toBe(3);
   });
 
-  it('should clear needs_revalidation status', () => {
+  it('should clear high inaccuracy on reinforce', () => {
     const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'Content' });
-    updateStatus(entry.id, 'needs_revalidation');
+    setInaccuracy(entry.id, INACCURACY_THRESHOLD + 0.5);
 
     // Simulate reinforce tool
     recordAccess(entry.id, REINFORCE_ACCESS_BOOST);
-    const found = getKnowledgeById(entry.id)!;
-    if (found.status === 'needs_revalidation') {
-      updateStatus(entry.id, 'active');
-    }
+    resetInaccuracy(entry.id);
 
     const updated = getKnowledgeById(entry.id)!;
     expect(updated.status).toBe('active');
+    expect(updated.inaccuracy).toBe(0);
   });
 
   it('should increase calculated strength', () => {
@@ -233,7 +234,7 @@ describe('deprecate workflow', () => {
 // === Update + cascade revalidation workflow ===
 
 describe('update + cascade revalidation workflow', () => {
-  it('should flag dependent entries as needs_revalidation', () => {
+  it('should bump inaccuracy on dependent entries when base is updated', () => {
     const base = insertKnowledge({
       type: 'decision',
       title: 'Use REST API',
@@ -259,24 +260,21 @@ describe('update + cascade revalidation workflow', () => {
     // Simulate update tool: update the base entry
     updateKnowledgeFields(base.id, { content: 'We switched to GraphQL' });
 
-    // Cascade revalidation (as update tool does)
-    const incomingLinks = getIncomingLinks(base.id, REVALIDATION_LINK_TYPES);
-    const revalidatedIds: string[] = [];
-    for (const link of incomingLinks) {
-      const dependentEntry = getKnowledgeById(link.source_id);
-      if (dependentEntry && dependentEntry.status !== 'deprecated') {
-        updateStatus(link.source_id, 'needs_revalidation');
-        revalidatedIds.push(link.source_id);
-      }
-    }
+    // Propagate inaccuracy (as update tool does)
+    const diffFactor = 1.0; // Simulate a full rewrite
+    const bumps = propagateInaccuracy(base.id, diffFactor);
 
-    expect(revalidatedIds).toHaveLength(2);
-    expect(revalidatedIds).toContain(derived.id);
-    expect(revalidatedIds).toContain(depending.id);
+    expect(bumps).toHaveLength(2);
+    expect(bumps.map((b) => b.id)).toContain(derived.id);
+    expect(bumps.map((b) => b.id)).toContain(depending.id);
 
-    // Verify the dependent entries have the flag
-    expect(getKnowledgeById(derived.id)!.status).toBe('needs_revalidation');
-    expect(getKnowledgeById(depending.id)!.status).toBe('needs_revalidation');
+    // Verify the dependent entries have high inaccuracy
+    expect(getKnowledgeById(derived.id)!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
+    expect(getKnowledgeById(depending.id)!.inaccuracy).toBeGreaterThan(0);
+
+    // Both should still be active (not deprecated)
+    expect(getKnowledgeById(derived.id)!.status).toBe('active');
+    expect(getKnowledgeById(depending.id)!.status).toBe('active');
 
     // Base entry should still be active
     expect(getKnowledgeById(base.id)!.status).toBe('active');
@@ -299,7 +297,7 @@ describe('update + cascade revalidation workflow', () => {
     expect(getKnowledgeById(related.id)!.status).toBe('active');
   });
 
-  it('should not flag deprecated entries', () => {
+  it('should not bump inaccuracy on deprecated entries', () => {
     const base = insertKnowledge({ type: 'fact', title: 'Base', content: 'base' });
     const deprecated = insertKnowledge({ type: 'fact', title: 'Deprecated', content: 'dep' });
 
@@ -309,20 +307,15 @@ describe('update + cascade revalidation workflow', () => {
 
     updateKnowledgeFields(base.id, { content: 'Updated' });
 
-    const incomingLinks = getIncomingLinks(base.id, REVALIDATION_LINK_TYPES);
-    const revalidatedIds: string[] = [];
-    for (const link of incomingLinks) {
-      const dependentEntry = getKnowledgeById(link.source_id);
-      if (dependentEntry && dependentEntry.status !== 'deprecated') {
-        updateStatus(link.source_id, 'needs_revalidation');
-        revalidatedIds.push(link.source_id);
-      }
-    }
+    // propagateInaccuracy skips deprecated entries
+    const bumps = propagateInaccuracy(base.id, 1.0);
+    expect(bumps).toHaveLength(0);
 
-    expect(revalidatedIds).toHaveLength(0);
+    // Deprecated entry should still have 0 inaccuracy
+    expect(getKnowledgeById(deprecated.id)!.inaccuracy).toBe(0);
   });
 
-  it('should clear needs_revalidation when the entry itself is updated', () => {
+  it('should clear inaccuracy when the entry itself is updated', () => {
     const entry = insertKnowledge({
       type: 'wiki',
       title: 'Project Overview',
@@ -330,21 +323,17 @@ describe('update + cascade revalidation workflow', () => {
     });
 
     // Simulate the entry being flagged for revalidation (e.g. a dependency changed)
-    updateStatus(entry.id, 'needs_revalidation');
-    expect(getKnowledgeById(entry.id)!.status).toBe('needs_revalidation');
+    setInaccuracy(entry.id, INACCURACY_THRESHOLD + 0.5);
+    expect(getKnowledgeById(entry.id)!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
 
-    // Simulate update_knowledge tool behavior: update fields, then clear status
-    const oldEntry = getKnowledgeById(entry.id);
+    // Simulate update_knowledge tool behavior: update fields, then reset inaccuracy
     updateKnowledgeFields(entry.id, { content: 'Full wiki content filled by agent' });
+    resetInaccuracy(entry.id);
 
-    // This is the logic from update.ts lines 48-51
-    if (oldEntry && oldEntry.status === 'needs_revalidation') {
-      updateStatus(entry.id, 'active');
-    }
-
-    // Entry should now be active, not stuck as needs_revalidation
+    // Entry should now be active with zero inaccuracy
     const updated = getKnowledgeById(entry.id)!;
     expect(updated.status).toBe('active');
+    expect(updated.inaccuracy).toBe(0);
     expect(updated.content).toBe('Full wiki content filled by agent');
   });
 });
@@ -542,7 +531,7 @@ describe('link workflow', () => {
 // === Supersedes revalidation workflow ===
 
 describe('supersedes revalidation workflow', () => {
-  it('should flag target as needs_revalidation when supersedes link is created', () => {
+  it('should bump inaccuracy on target when supersedes link is created', () => {
     const old = insertKnowledge({
       type: 'decision',
       title: 'Use Preact Signals',
@@ -560,15 +549,17 @@ describe('supersedes revalidation workflow', () => {
 
     const target = getKnowledgeById(old.id)!;
     if (target.status !== 'deprecated') {
-      updateStatus(old.id, 'needs_revalidation');
+      setInaccuracy(old.id, INACCURACY_THRESHOLD);
     }
 
-    expect(getKnowledgeById(old.id)!.status).toBe('needs_revalidation');
-    // The superseding entry should remain active
+    expect(getKnowledgeById(old.id)!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
+    expect(getKnowledgeById(old.id)!.status).toBe('active');
+    // The superseding entry should remain active with no inaccuracy
     expect(getKnowledgeById(replacement.id)!.status).toBe('active');
+    expect(getKnowledgeById(replacement.id)!.inaccuracy).toBe(0);
   });
 
-  it('should flag target when supersedes link is created inline via store', () => {
+  it('should bump inaccuracy on target when supersedes link is created inline via store', () => {
     const old = insertKnowledge({
       type: 'convention',
       title: 'Use REST API',
@@ -586,13 +577,14 @@ describe('supersedes revalidation workflow', () => {
 
     const target = getKnowledgeById(old.id)!;
     if (target.status !== 'deprecated') {
-      updateStatus(old.id, 'needs_revalidation');
+      setInaccuracy(old.id, INACCURACY_THRESHOLD);
     }
 
-    expect(getKnowledgeById(old.id)!.status).toBe('needs_revalidation');
+    expect(getKnowledgeById(old.id)!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
+    expect(getKnowledgeById(old.id)!.status).toBe('active');
   });
 
-  it('should NOT flag deprecated targets when superseded', () => {
+  it('should NOT bump inaccuracy on deprecated targets when superseded', () => {
     const old = insertKnowledge({
       type: 'decision',
       title: 'Old decision',
@@ -610,11 +602,12 @@ describe('supersedes revalidation workflow', () => {
 
     const target = getKnowledgeById(old.id)!;
     if (target.status !== 'deprecated') {
-      updateStatus(old.id, 'needs_revalidation');
+      setInaccuracy(old.id, INACCURACY_THRESHOLD);
     }
 
-    // Should still be deprecated, not changed to needs_revalidation
+    // Should still be deprecated with no inaccuracy bump
     expect(getKnowledgeById(old.id)!.status).toBe('deprecated');
+    expect(getKnowledgeById(old.id)!.inaccuracy).toBe(0);
   });
 
   it('should NOT flag target for non-supersedes link types', () => {
@@ -844,27 +837,29 @@ describe('list_knowledge pagination', () => {
 });
 
 describe('flag_reason workflow', () => {
-  it('should clear flag_reason and status when agent updates a flagged entry', () => {
+  it('should clear flag_reason and inaccuracy when agent updates a flagged entry', () => {
     const entry = insertKnowledge({
       type: 'wiki',
       title: 'Flagged Wiki Page',
       content: 'Original content with stale numbers',
     });
 
-    // Flag the entry
+    // Flag the entry (sets inaccuracy to threshold, keeps status active)
     const flagged = flagForRevalidation(entry.id, 'Numbers are outdated');
-    expect(flagged!.status).toBe('needs_revalidation');
+    expect(flagged!.status).toBe('active');
+    expect(flagged!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
     expect(flagged!.flag_reason).toBe('Numbers are outdated');
 
-    // Simulate what update.ts does: update content and clear flag_reason
+    // Simulate what update.ts does: update content, reset inaccuracy, clear flag_reason
     updateKnowledgeFields(entry.id, {
       content: 'Updated content with fresh numbers',
     });
-    updateStatus(entry.id, 'active');
+    resetInaccuracy(entry.id);
     updateKnowledgeContent(entry.id, { flag_reason: null });
 
     const updated = getKnowledgeById(entry.id)!;
     expect(updated.status).toBe('active');
+    expect(updated.inaccuracy).toBe(0);
     expect(updated.flag_reason).toBeNull();
     expect(updated.content).toBe('Updated content with fresh numbers');
   });

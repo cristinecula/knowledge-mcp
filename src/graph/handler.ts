@@ -11,13 +11,13 @@ import {
   updateKnowledgeFields,
   deleteKnowledge,
   insertLink,
-  updateStatus,
+  setInaccuracy,
   flagForRevalidation,
 } from '../db/queries.js';
 import { getEmbeddingProvider } from '../embeddings/provider.js';
 import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
 import { getEntryHistory, getEntryAtCommitWithParent } from '../sync/index.js';
-import { SCOPES, type Scope } from '../types.js';
+import { SCOPES, INACCURACY_THRESHOLD, type Scope } from '../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = resolve(__dirname, 'static');
@@ -306,8 +306,8 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         parentPageId,
       });
 
-      // Mark as needs_revalidation so agents discover it
-      updateStatus(entry.id, 'needs_revalidation');
+      // Mark with inaccuracy at threshold so agents discover and populate it
+      setInaccuracy(entry.id, INACCURACY_THRESHOLD);
 
       // Create source links (derived) if any
       for (const sourceId of sourceLinks) {
@@ -396,9 +396,9 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
 
       updateKnowledgeFields(id, fields as Parameters<typeof updateKnowledgeFields>[1]);
 
-      // Re-mark as needs_revalidation so agents re-process it
+      // Re-mark with inaccuracy at threshold so agents re-process it
       if (body.declaration !== undefined) {
-        updateStatus(id, 'needs_revalidation');
+        setInaccuracy(id, INACCURACY_THRESHOLD);
       }
 
       const result = getKnowledgeById(id)!;

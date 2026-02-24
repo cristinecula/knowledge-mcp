@@ -31,7 +31,6 @@ const LINK_DASH = {
 
 const STATUS_OPACITY = {
   active: 1,
-  needs_revalidation: 1,
   deprecated: 0.15,
 };
 
@@ -169,11 +168,13 @@ function applyFilters(data) {
   if (projectFilter) {
     nodes = nodes.filter(n => (n.project || '') === projectFilter);
   }
-  if (statusFilter && statusFilter !== 'all') {
+  if (statusFilter === 'high_inaccuracy') {
+    nodes = nodes.filter(n => n.status === 'active' && (n.inaccuracy || 0) >= 1.0);
+  } else if (statusFilter && statusFilter !== 'all') {
     nodes = nodes.filter(n => n.status === statusFilter);
   } else if (!statusFilter) {
-    // Default: active + needs_revalidation only
-    nodes = nodes.filter(n => n.status === 'active' || n.status === 'needs_revalidation');
+    // Default: active only (inaccuracy is now a continuous score, not a status)
+    nodes = nodes.filter(n => n.status === 'active');
   }
 
   const nodeIds = new Set(nodes.map(n => n.id));
@@ -240,8 +241,8 @@ function render(data) {
     .style('cursor', 'pointer')
     .call(drag(simulation));
 
-  // Pulsing for needs_revalidation
-  node.filter(d => d.status === 'needs_revalidation')
+  // Pulsing for high inaccuracy (at or above threshold)
+  node.filter(d => (d.inaccuracy || 0) >= 1.0)
     .style('animation', 'pulse 2s ease-in-out infinite');
 
   // Labels
@@ -263,7 +264,8 @@ function render(data) {
       tooltip.style.display = 'block';
       tooltip.querySelector('.tt-title').textContent = d.title;
       tooltip.querySelector('.tt-meta').textContent =
-        `${d.type} | strength: ${d.strength.toFixed(3)} | ${d.status}`;
+        `${d.type} | strength: ${d.strength.toFixed(3)} | ${d.status}` +
+        ((d.inaccuracy || 0) > 0 ? ` | inaccuracy: ${d.inaccuracy.toFixed(3)}` : '');
     })
     .on('mousemove', (event) => {
       tooltip.style.left = (event.pageX + 12) + 'px';
@@ -341,16 +343,26 @@ function updateVisuals() {
     .attr('stroke', d => {
       if (searchActive && d.id === focusedId) return '#f0c040';
       if (searchActive && searchMatchIds.has(d.id)) return '#f0f6fc';
-      if (d.status === 'needs_revalidation') return '#d29922';
       if (d.id === selectedNodeId) return '#f0f6fc';
+      const inac = d.inaccuracy || 0;
+      if (inac > 0) return '#d29922';
       return 'none';
     })
     .attr('stroke-width', d => {
       if (searchActive && d.id === focusedId) return 3.5;
       if (searchActive && searchMatchIds.has(d.id)) return 2;
-      if (d.status === 'needs_revalidation') return 3;
       if (d.id === selectedNodeId) return 2;
+      const inac = d.inaccuracy || 0;
+      if (inac > 0) return Math.min(3.5, (inac / 1.0) * 3.5);
       return 0;
+    })
+    .attr('stroke-opacity', d => {
+      if (searchActive && d.id === focusedId) return 1;
+      if (searchActive && searchMatchIds.has(d.id)) return 1;
+      if (d.id === selectedNodeId) return 1;
+      const inac = d.inaccuracy || 0;
+      if (inac > 0) return 0.3 + Math.min(0.7, (inac / 1.0) * 0.7);
+      return 1;
     });
 
   // Labels
@@ -391,11 +403,17 @@ async function showSidebar(id) {
   const strengthPct = Math.min(100, Math.max(0, entry.strength * 100));
   const strengthColor = entry.strength >= 0.5 ? '#3fb950' : entry.strength >= 0.1 ? '#d29922' : '#f85149';
 
+  const inaccuracy = entry.inaccuracy || 0;
+  const inaccuracyPct = Math.min(100, Math.max(0, (inaccuracy / 1.0) * 100));
+  const inaccuracyColor = inaccuracy >= 1.0 ? '#f85149' : inaccuracy >= 0.5 ? '#d29922' : '#3fb950';
+  const needsRevalidation = inaccuracy >= 1.0;
+
   let html = `
     <h2>${escapeHtml(entry.title)}</h2>
     <div>
       <span class="entry-type" style="background:${color}22;color:${color}">${entry.type}</span>
       <span class="status-badge status-${entry.status}">${entry.status}</span>
+      ${needsRevalidation ? '<span class="status-badge status-needs_revalidation">needs revalidation</span>' : ''}
     </div>
     <div class="meta">
       <span>Scope: ${entry.scope}</span>
@@ -410,6 +428,15 @@ async function showSidebar(id) {
       </div>
       <div class="strength-bar">
         <div class="strength-fill" style="width:${strengthPct}%;background:${strengthColor}"></div>
+      </div>
+    </div>
+    <div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#8b949e;margin-bottom:4px">
+        <span>Inaccuracy</span>
+        <span>${inaccuracy.toFixed(3)}${needsRevalidation ? ' (above threshold)' : ''}</span>
+      </div>
+      <div class="inaccuracy-bar">
+        <div class="inaccuracy-fill" style="width:${inaccuracyPct}%;background:${inaccuracyColor}"></div>
       </div>
     </div>
   `;

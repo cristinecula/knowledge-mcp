@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, getOutgoingLinks, getLinksForEntry, updateStatus, updateKnowledgeContent } from '../db/queries.js';
+import { updateKnowledgeFields, getKnowledgeById, getOutgoingLinks, getLinksForEntry, updateKnowledgeContent, resetInaccuracy, computeDiffFactor, propagateInaccuracy } from '../db/queries.js';
 import { syncWriteEntry, scheduleCommit } from '../sync/index.js';
-import { KNOWLEDGE_TYPES, SCOPES, REVALIDATION_LINK_TYPES } from '../types.js';
+import { KNOWLEDGE_TYPES, SCOPES, INACCURACY_THRESHOLD } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
 
 export function registerUpdateTool(server: McpServer): void {
@@ -11,9 +11,9 @@ export function registerUpdateTool(server: McpServer): void {
     {
       description:
         'Update an existing knowledge entry\'s content, title, tags, or type. ' +
-        'When an entry is updated, entries that are linked to it via "derived" or "depends" ' +
-        'links are automatically flagged as "needs_revalidation" — they may need to be ' +
-        'reviewed to ensure they\'re still accurate given the change.',
+        'When an entry is updated, inaccuracy is propagated through the knowledge graph — ' +
+        'linked entries accumulate inaccuracy based on how much changed and how closely they are linked. ' +
+        'Updating an entry also resets its own inaccuracy to 0 (updating IS revalidation).',
       inputSchema: {
         id: z.string().uuid().describe('ID of the knowledge entry to update'),
         title: z.string().optional().describe('Updated title'),
@@ -35,6 +35,16 @@ export function registerUpdateTool(server: McpServer): void {
     async ({ id, title, content, tags, type, project, scope }) => {
       try {
         const oldEntry = getKnowledgeById(id);
+        if (!oldEntry) {
+          return {
+            content: [{ type: 'text', text: `Entry not found: ${id}` }],
+            isError: true,
+          };
+        }
+
+        // Compute diff factor BEFORE applying the update
+        const diffFactor = computeDiffFactor(oldEntry, { title, content, tags });
+
         const updated = updateKnowledgeFields(id, {
           title,
           content,
@@ -45,16 +55,16 @@ export function registerUpdateTool(server: McpServer): void {
         });
 
         if (updated) {
-          // Clear needs_revalidation — updating the entry IS the revalidation
-          if (oldEntry && oldEntry.status === 'needs_revalidation') {
-            updateStatus(id, 'active');
+          // Reset inaccuracy — updating the entry IS revalidation
+          if (oldEntry.inaccuracy > 0) {
+            resetInaccuracy(id);
             // Clear any human flag_reason since the agent has now addressed it
             if (oldEntry.flag_reason) {
               updateKnowledgeContent(id, { flag_reason: null });
             }
           }
 
-          syncWriteEntry(updated, oldEntry?.type, oldEntry?.scope, oldEntry?.project);
+          syncWriteEntry(updated, oldEntry.type, oldEntry.scope, oldEntry.project);
           
           // Schedule a debounced git commit
           scheduleCommit(`knowledge: update ${updated.type} "${updated.title}"`);
@@ -66,26 +76,39 @@ export function registerUpdateTool(server: McpServer): void {
             });
           }
 
-          // Cascade revalidation: flag entries linked via 'derived' or 'depends'
-          const revalidated: string[] = [];
-          const incomingLinks = getIncomingLinks(id, REVALIDATION_LINK_TYPES);
-          for (const link of incomingLinks) {
-            const linkedEntry = getKnowledgeById(link.source_id);
-            if (linkedEntry && linkedEntry.status !== 'deprecated') {
-              updateStatus(link.source_id, 'needs_revalidation');
-              revalidated.push(link.source_id);
+          // Propagate inaccuracy through the knowledge graph
+          const bumps = propagateInaccuracy(id, diffFactor);
+
+          // Sync bumped entries so inaccuracy changes are shared
+          for (const bump of bumps) {
+            const bumpedEntry = getKnowledgeById(bump.id);
+            if (bumpedEntry) {
+              syncWriteEntry(bumpedEntry);
             }
+          }
+          if (bumps.length > 0) {
+            scheduleCommit(`knowledge: propagate inaccuracy from "${updated.title}"`);
           }
 
           let responseText = `Updated knowledge entry: ${updated.title} (ID: ${id})`;
-          if (revalidated.length > 0) {
-            responseText += `\n\nCascade revalidation: flagged ${revalidated.length} linked entries as needs_revalidation:\n${revalidated.map((rid) => `  - ${rid}`).join('\n')}`;
+
+          if (bumps.length > 0) {
+            const aboveThreshold = bumps.filter((b) => b.newInaccuracy >= INACCURACY_THRESHOLD);
+            responseText += `\n\nInaccuracy propagated to ${bumps.length} entries`;
+            if (aboveThreshold.length > 0) {
+              responseText += ` (${aboveThreshold.length} now above threshold)`;
+            }
+            responseText += ':';
+            for (const bump of bumps) {
+              const marker = bump.newInaccuracy >= INACCURACY_THRESHOLD ? ' (above threshold!)' : '';
+              responseText += `\n  - ${bump.id} inaccuracy: ${bump.previousInaccuracy.toFixed(2)} → ${bump.newInaccuracy.toFixed(2)}${marker}`;
+            }
           }
 
           // Surface the declaration for wiki entries so agents know the intent
           if (updated.type === 'wiki' && updated.declaration) {
             responseText +=
-              `\n\n📋 DECLARATION: "${updated.declaration}"\n` +
+              `\n\nDECLARATION: "${updated.declaration}"\n` +
               'Ensure the content you wrote aligns with this declaration (tone, length, focus).';
           }
 
@@ -98,7 +121,7 @@ export function registerUpdateTool(server: McpServer): void {
             });
             if (!hasSourceLink) {
               responseText +=
-                '\n\n⚠ WARNING: This wiki entry has no links to source knowledge entries. ' +
+                '\n\nWARNING: This wiki entry has no links to source knowledge entries. ' +
                 'Wiki pages should reference the knowledge entries they are derived from. ' +
                 'Use link_knowledge to create links (e.g., "derived", "elaborates", or "related") ' +
                 'from this wiki entry to the relevant source entries.';
@@ -113,13 +136,13 @@ export function registerUpdateTool(server: McpServer): void {
               const isConflictCopy = cl.source_id === id;
               if (isConflictCopy) {
                 responseText +=
-                  `\n\n⚠ SYNC CONFLICT: This entry is a sync conflict copy. ` +
+                  `\n\nSYNC CONFLICT: This entry is a sync conflict copy. ` +
                   `The canonical version is ${cl.target_id}. ` +
                   `If you are resolving the conflict, update the canonical entry instead, ` +
                   `then delete this conflict copy with delete_knowledge and remove the conflicts_with link.`;
               } else {
                 responseText +=
-                  `\n\n⚠ SYNC CONFLICT: This entry has an unresolved sync conflict. ` +
+                  `\n\nSYNC CONFLICT: This entry has an unresolved sync conflict. ` +
                   `A conflict copy with local changes exists at ${cl.source_id}. ` +
                   `If the local changes in the conflict copy should be preserved, merge them into this entry. ` +
                   `Then delete the conflict copy with delete_knowledge and remove the conflicts_with link.`;

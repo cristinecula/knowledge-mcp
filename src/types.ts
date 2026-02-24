@@ -24,7 +24,6 @@ export type Scope = (typeof SCOPES)[number];
 export const STATUSES = [
   'active',
   'deprecated',
-  'needs_revalidation',
 ] as const;
 
 export type Status = (typeof STATUSES)[number];
@@ -66,6 +65,7 @@ export interface KnowledgeEntry {
   flag_reason: string | null;
   declaration: string | null;
   parent_page_id: string | null;
+  inaccuracy: number;
   version: number;
   synced_version: number | null;
 }
@@ -92,6 +92,7 @@ export interface KnowledgeRow {
   flag_reason: string | null;
   declaration: string | null;
   parent_page_id: string | null;
+  inaccuracy: number;
   version: number;
   synced_version: number | null;
 }
@@ -145,8 +146,33 @@ export const MAX_NETWORK_BONUS_RATIO = 0.5;
 /** Access count boost for explicit reinforcement */
 export const REINFORCE_ACCESS_BOOST = 3;
 
-/** Link types that trigger revalidation on update */
+/** Link types that trigger revalidation on update — DEPRECATED, use INACCURACY_LINK_WEIGHTS */
 export const REVALIDATION_LINK_TYPES: LinkType[] = ['derived', 'depends'];
+
+// === Inaccuracy Propagation Constants ===
+
+/** Inaccuracy threshold — entry needs revalidation when inaccuracy >= this value */
+export const INACCURACY_THRESHOLD = 1.0;
+
+/** Decay factor per hop during BFS propagation */
+export const INACCURACY_HOP_DECAY = 0.5;
+
+/** Maximum inaccuracy value (prevents unbounded growth) */
+export const INACCURACY_CAP = 2.0;
+
+/** Minimum bump to continue propagation */
+export const INACCURACY_FLOOR = 0.001;
+
+/** Link type weights for inaccuracy propagation (how much a linked entry is affected) */
+export const INACCURACY_LINK_WEIGHTS: Record<LinkType, number> = {
+  derived: 1.0,
+  contradicts: 0.7,
+  depends: 0.6,
+  elaborates: 0.4,
+  supersedes: 0.3,
+  related: 0.1,
+  conflicts_with: 0,
+};
 
 // === Helpers ===
 

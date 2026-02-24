@@ -370,6 +370,20 @@ svg {
   transition: width 0.3s;
 }
 
+#sidebar .inaccuracy-bar {
+  width: 100%;
+  height: 6px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#sidebar .inaccuracy-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
 #sidebar .status-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -414,7 +428,7 @@ svg {
   margin-top: 2px;
 }
 
-/* --- Pulsing animation for needs_revalidation --- */
+/* --- Pulsing animation for high inaccuracy nodes --- */
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }

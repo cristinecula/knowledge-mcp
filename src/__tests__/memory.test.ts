@@ -9,6 +9,7 @@ import {
   updateStrength,
   updateStatus,
   recordAccess,
+  setInaccuracy,
 } from '../db/queries.js';
 import { getDb } from '../db/connection.js';
 import {
@@ -211,9 +212,9 @@ describe('runMaintenanceSweep', () => {
     expect(result.processed).toBe(0);
   });
 
-  it('should process needs_revalidation entries', () => {
+  it('should process high-inaccuracy active entries', () => {
     const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'Content' });
-    updateStatus(entry.id, 'needs_revalidation');
+    setInaccuracy(entry.id, 1.5);
 
     const result = runMaintenanceSweep();
     expect(result.processed).toBe(1);

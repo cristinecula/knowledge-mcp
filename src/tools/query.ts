@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { KNOWLEDGE_TYPES, SCOPES } from '../types.js';
+import { KNOWLEDGE_TYPES, SCOPES, INACCURACY_THRESHOLD } from '../types.js';
 import { searchKnowledge, batchRecordAccess, getLinksForEntries } from '../db/queries.js';
 import { getEmbeddingProvider } from '../embeddings/provider.js';
 import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
@@ -37,10 +37,11 @@ export function registerQueryTool(server: McpServer): void {
           'project returns project+company, company returns only company-wide',
         ),
         include_weak: z.boolean().optional().describe('Include weak entries (strength 0.1-0.5) in results. Default: false'),
+        above_threshold: z.boolean().optional().describe('Only return entries with inaccuracy above threshold (needs revalidation). Default: false'),
         limit: z.number().min(1).max(50).optional().describe('Max results to return (default: 10, max: 50)'),
       },
     },
-    async ({ query, type, tags, project, scope, include_weak, limit }) => {
+    async ({ query, type, tags, project, scope, include_weak, above_threshold, limit }) => {
       try {
         const maxResults = limit ?? 10;
 
@@ -52,6 +53,7 @@ export function registerQueryTool(server: McpServer): void {
           project,
           scope,
           includeWeak: include_weak,
+          aboveThreshold: above_threshold,
           limit: maxResults * 2, // fetch more for merging
         });
 
@@ -68,6 +70,7 @@ export function registerQueryTool(server: McpServer): void {
               project,
               scope,
               includeWeak: include_weak,
+              aboveThreshold: above_threshold,
               limit: 200, // broad pool for vector search
             });
 
@@ -146,7 +149,8 @@ export function registerQueryTool(server: McpServer): void {
             status: entry.status,
             access_count: entry.access_count + 1, // reflect the access we just recorded
             last_accessed_at: new Date().toISOString(),
-            needs_revalidation: entry.status === 'needs_revalidation',
+            needs_revalidation: entry.inaccuracy >= INACCURACY_THRESHOLD,
+            inaccuracy: Math.round(entry.inaccuracy * 1000) / 1000,
             link_count: links.length,
             links: links.map((l) => ({
               link_id: l.id,

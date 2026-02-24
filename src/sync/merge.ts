@@ -86,6 +86,7 @@ export function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean
     (local.declaration ?? null) === (remote.declaration ?? null) &&
     (local.parent_page_id ?? null) === (remote.parent_page_id ?? null) &&
     (local.deprecation_reason ?? null) === (remote.deprecation_reason ?? null) &&
-    (local.flag_reason ?? null) === (remote.flag_reason ?? null)
+    (local.flag_reason ?? null) === (remote.flag_reason ?? null) &&
+    (local.inaccuracy ?? 0) === (remote.inaccuracy ?? 0)
   );
 }

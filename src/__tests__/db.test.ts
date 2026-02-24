@@ -25,6 +25,7 @@ import {
   deleteEmbedding,
   getGraphData,
   flagForRevalidation,
+  setInaccuracy,
 } from '../db/queries.js';
 
 beforeEach(() => {
@@ -362,16 +363,16 @@ describe('getAllEntries', () => {
 });
 
 describe('getAllActiveEntries', () => {
-  it('should return active and needs_revalidation entries', () => {
+  it('should return active entries including those with high inaccuracy', () => {
     const a = insertKnowledge({ type: 'fact', title: 'A', content: 'a' });
     const b = insertKnowledge({ type: 'fact', title: 'B', content: 'b' });
     insertKnowledge({ type: 'fact', title: 'C', content: 'c' });
 
     updateStatus(a.id, 'deprecated');
-    updateStatus(b.id, 'needs_revalidation');
+    setInaccuracy(b.id, 1.5); // High inaccuracy but still active
 
     const active = getAllActiveEntries();
-    expect(active).toHaveLength(2); // B (needs_revalidation) and C (active)
+    expect(active).toHaveLength(2); // B (active, high inaccuracy) and C (active)
   });
 });
 
@@ -702,20 +703,21 @@ describe('wiki knowledge type', () => {
     expect(results.every((r) => r.type === 'wiki')).toBe(true);
   });
 
-  it('should include needs_revalidation wiki entries in default list', () => {
+  it('should include high-inaccuracy wiki entries in default list', () => {
     const wiki = insertKnowledge({ type: 'wiki', title: 'Wiki Page', content: 'content' });
-    updateStatus(wiki.id, 'needs_revalidation');
+    setInaccuracy(wiki.id, 1.5); // High inaccuracy but still active
 
-    // Default (no status) should include needs_revalidation
+    // Default (no status) should include high-inaccuracy active entries
     const defaultResults = listKnowledge({ type: 'wiki' });
     expect(defaultResults).toHaveLength(1);
-    expect(defaultResults[0].status).toBe('needs_revalidation');
+    expect(defaultResults[0].status).toBe('active');
+    expect(defaultResults[0].inaccuracy).toBeGreaterThanOrEqual(1.0);
 
-    // Explicit status: 'active' should exclude needs_revalidation
+    // Explicit status: 'active' should include it (it's still active)
     const activeOnly = listKnowledge({ type: 'wiki', status: 'active' });
-    expect(activeOnly).toHaveLength(0);
+    expect(activeOnly).toHaveLength(1);
 
-    // Explicit status: 'needs_revalidation' should include it
+    // Virtual status: 'needs_revalidation' should include it (maps to inaccuracy >= threshold)
     const revalOnly = listKnowledge({ type: 'wiki', status: 'needs_revalidation' });
     expect(revalOnly).toHaveLength(1);
   });
@@ -809,7 +811,7 @@ describe('declaration field', () => {
 });
 
 describe('flagForRevalidation', () => {
-  it('should set status to needs_revalidation', () => {
+  it('should set inaccuracy to threshold while keeping status active', () => {
     const entry = insertKnowledge({
       type: 'wiki',
       title: 'Wiki Page',
@@ -818,7 +820,8 @@ describe('flagForRevalidation', () => {
 
     const flagged = flagForRevalidation(entry.id);
     expect(flagged).not.toBeNull();
-    expect(flagged!.status).toBe('needs_revalidation');
+    expect(flagged!.status).toBe('active');
+    expect(flagged!.inaccuracy).toBeGreaterThanOrEqual(1.0);
   });
 
   it('should store flag_reason when provided', () => {
@@ -830,7 +833,8 @@ describe('flagForRevalidation', () => {
 
     const flagged = flagForRevalidation(entry.id, 'Statistics are outdated');
     expect(flagged!.flag_reason).toBe('Statistics are outdated');
-    expect(flagged!.status).toBe('needs_revalidation');
+    expect(flagged!.status).toBe('active');
+    expect(flagged!.inaccuracy).toBeGreaterThanOrEqual(1.0);
   });
 
   it('should store null flag_reason when no reason provided', () => {

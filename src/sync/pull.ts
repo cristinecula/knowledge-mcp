@@ -23,7 +23,7 @@ import {
   importLink,
   updateKnowledgeContent,
   updateSyncedVersion,
-  updateStatus,
+  setInaccuracy,
   deleteKnowledge,
   deleteLink,
   insertKnowledge,
@@ -39,6 +39,7 @@ import {
 import { gitPull } from './git.js';
 import type { EntryJSON } from './serialize.js';
 import type { KnowledgeType, LinkType, Scope, Status } from '../types.js';
+import { INACCURACY_THRESHOLD } from '../types.js';
 
 export interface PullResult {
   new_entries: number;
@@ -126,6 +127,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           flag_reason: remote.flag_reason ?? null,
           declaration: remote.declaration ?? null,
           parent_page_id: remote.parent_page_id ?? null,
+          inaccuracy: remote.inaccuracy ?? 0,
           created_at: remote.created_at,
           version: remote.version,
         });
@@ -167,6 +169,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           flag_reason: remote.flag_reason ?? null,
           declaration: remote.declaration ?? null,
           parent_page_id: remote.parent_page_id ?? null,
+          inaccuracy: remote.inaccuracy ?? 0,
           version: remote.version,
         });
         result.updated++;
@@ -204,8 +207,8 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           source: 'sync:conflict',
         });
 
-        // Mark conflict copy as needs_revalidation so agents know to resolve it
-        updateStatus(conflictEntry.id, 'needs_revalidation');
+        // Mark conflict copy with high inaccuracy so agents know to resolve it
+        setInaccuracy(conflictEntry.id, INACCURACY_THRESHOLD);
 
         // Step 2: Accept remote as canonical -- overwrite local entry
         updateKnowledgeContent(local.id, {
@@ -221,6 +224,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           flag_reason: remote.flag_reason ?? null,
           declaration: remote.declaration ?? null,
           parent_page_id: remote.parent_page_id ?? null,
+          inaccuracy: remote.inaccuracy ?? 0,
           version: remote.version,
         });
 
