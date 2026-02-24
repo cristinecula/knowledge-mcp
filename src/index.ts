@@ -3,7 +3,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { getDb, closeDb } from './db/connection.js';
-import { runMaintenanceSweep } from './memory/maintenance.js';
 import { startGraphServer, stopGraphServer } from './graph/server.js';
 import {
   createEmbeddingProvider,
@@ -107,12 +106,6 @@ async function main(): Promise<void> {
   // Initialize database
   getDb(dbPath);
   console.error('Database initialized');
-
-  // Run maintenance sweep (recalculate strengths)
-  const sweep = runMaintenanceSweep();
-  console.error(
-    `Maintenance sweep: ${sweep.processed} entries processed`,
-  );
 
   // Initialize sync (if configured)
   let config: SyncConfig | null = null;
@@ -265,15 +258,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // Set up periodic maintenance (every hour)
-  const maintenanceInterval = setInterval(() => {
-    try {
-      runMaintenanceSweep();
-    } catch (error) {
-      console.error('Maintenance sweep error:', error);
-    }
-  }, 60 * 60 * 1000);
-
   // Set up periodic sync (if enabled and interval > 0)
   let syncInterval: ReturnType<typeof setInterval> | null = null;
   if (config && syncIntervalSec > 0) {
@@ -307,7 +291,6 @@ async function main(): Promise<void> {
 
   // Clean shutdown
   const shutdown = async () => {
-    clearInterval(maintenanceInterval);
     if (syncInterval) clearInterval(syncInterval);
     // Flush any pending debounced commits before shutting down
     flushCommit();

@@ -4,21 +4,17 @@ import {
   getKnowledgeById,
   recordAccess,
   resetInaccuracy,
-  getLinksForEntry,
-  getLinkedEntries,
 } from '../db/queries.js';
-import { REINFORCE_ACCESS_BOOST, INACCURACY_THRESHOLD } from '../types.js';
-import { calculateNetworkStrength } from '../memory/strength.js';
+import { INACCURACY_THRESHOLD } from '../types.js';
 
 export function registerReinforceTool(server: McpServer): void {
   server.registerTool(
     'reinforce_knowledge',
     {
       description:
-        'Explicitly reinforce a knowledge entry, significantly boosting its memory strength. ' +
-        'Use this when you confirm that a piece of knowledge is still accurate and useful. ' +
-        'This also resets the entry\'s inaccuracy score to 0, clearing any revalidation need. ' +
-        'Reinforcement gives a +3 access boost (3x stronger than a normal query access).',
+        'Explicitly reinforce a knowledge entry, confirming it is still accurate and useful. ' +
+        'This resets the entry\'s inaccuracy score to 0, clearing any revalidation need. ' +
+        'Also records an access to keep the entry\'s last_accessed_at current.',
       inputSchema: {
         id: z.string().describe('ID of the knowledge entry to reinforce'),
       },
@@ -38,8 +34,8 @@ export function registerReinforceTool(server: McpServer): void {
           };
         }
 
-        // Boost access count
-        recordAccess(id, REINFORCE_ACCESS_BOOST);
+        // Record access
+        recordAccess(id, 1);
 
         // Reset inaccuracy (reinforcing confirms entry is accurate)
         const previousInaccuracy = entry.inaccuracy;
@@ -47,11 +43,7 @@ export function registerReinforceTool(server: McpServer): void {
           resetInaccuracy(id);
         }
 
-        // Re-fetch and calculate new strength
         const updated = getKnowledgeById(id)!;
-        const links = getLinksForEntry(id);
-        const linkedEntries = getLinkedEntries(id);
-        const newStrength = calculateNetworkStrength(updated, links, linkedEntries);
 
         return {
           content: [
@@ -61,8 +53,6 @@ export function registerReinforceTool(server: McpServer): void {
                 {
                   id: updated.id,
                   title: updated.title,
-                  previous_strength: Math.round(entry.strength * 1000) / 1000,
-                  new_strength: Math.round(newStrength * 1000) / 1000,
                   access_count: updated.access_count,
                   status: updated.status,
                   previous_inaccuracy: Math.round(previousInaccuracy * 1000) / 1000,

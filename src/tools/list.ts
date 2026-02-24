@@ -20,9 +20,9 @@ export function registerListTool(server: McpServer): void {
           .optional()
           .describe('Filter by status. "needs_revalidation" returns active entries with inaccuracy above threshold. (default: active)'),
         sort_by: z
-          .enum(['strength', 'recent', 'created'])
+          .enum(['recent', 'created'])
           .optional()
-          .describe('Sort order: strength (default), recent (last accessed), created'),
+          .describe('Sort order: recent (last accessed, default), created'),
         limit: z.number().min(1).max(100).optional().describe('Max results (default: 20, max: 100)'),
         offset: z.number().min(0).optional().describe('Offset for pagination (default: 0). Use with limit to page through results.'),
       },
@@ -37,7 +37,6 @@ export function registerListTool(server: McpServer): void {
           project,
           scope,
           status,
-          includeWeak: status === 'all',
         };
 
         const total = countKnowledge(filterParams);
@@ -95,7 +94,6 @@ export function registerListTool(server: McpServer): void {
             tags: entry.tags,
             project: entry.project,
             scope: entry.scope,
-            strength: Math.round(entry.strength * 1000) / 1000,
             status: entry.status,
             access_count: entry.access_count,
             created_at: entry.created_at,

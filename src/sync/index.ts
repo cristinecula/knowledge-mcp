@@ -3,7 +3,7 @@
  *
  * JSON files in a git repo are the canonical shared data.
  * SQLite is a local index/cache enriched with personal memory data.
- * Content syncs; strength/access_count/last_accessed_at stay local.
+ * Content syncs; access_count/last_accessed_at stay local.
  */
 
 export { setSyncConfig, getSyncConfig, isSyncEnabled, isSyncInProgress, setSyncInProgress, tryAcquireSyncLock, releaseSyncLock, SYNC_SCHEMA_VERSION } from './config.js';

@@ -13,7 +13,7 @@ export function registerSyncTool(server: McpServer): void {
         '"both" does pull then push. ' +
         'Conflicts (both sides changed) create a [Sync Conflict] entry linked via ' +
         '"contradicts" — review both versions and keep the correct one. ' +
-        'Your personal memory (strength, access counts) is never affected by sync.',
+        'Your local access counts and last_accessed_at are never affected by sync.',
       inputSchema: {
         direction: z
           .enum(['pull', 'push', 'both'])

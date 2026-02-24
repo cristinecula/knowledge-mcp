@@ -33,8 +33,8 @@ import {
   resetInaccuracy,
   propagateInaccuracy,
 } from '../db/queries.js';
-import { calculateNetworkStrength } from '../memory/strength.js';
-import { REINFORCE_ACCESS_BOOST, REVALIDATION_LINK_TYPES, INACCURACY_THRESHOLD } from '../types.js';
+import { INACCURACY_THRESHOLD } from '../types.js';
+import type { LinkType } from '../types.js';
 
 beforeEach(() => {
   setupTestDb();
@@ -158,15 +158,14 @@ describe('list workflow', () => {
 // === Reinforce workflow ===
 
 describe('reinforce workflow', () => {
-  it('should boost access count by REINFORCE_ACCESS_BOOST', () => {
+  it('should record access on reinforce', () => {
     const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'Content' });
 
-    // Simulate reinforce tool
-    recordAccess(entry.id, REINFORCE_ACCESS_BOOST);
+    // Simulate reinforce tool (now just records access)
+    recordAccess(entry.id, 1);
 
     const updated = getKnowledgeById(entry.id)!;
-    expect(updated.access_count).toBe(REINFORCE_ACCESS_BOOST);
-    expect(REINFORCE_ACCESS_BOOST).toBe(3);
+    expect(updated.access_count).toBe(1);
   });
 
   it('should clear high inaccuracy on reinforce', () => {
@@ -174,26 +173,12 @@ describe('reinforce workflow', () => {
     setInaccuracy(entry.id, INACCURACY_THRESHOLD + 0.5);
 
     // Simulate reinforce tool
-    recordAccess(entry.id, REINFORCE_ACCESS_BOOST);
+    recordAccess(entry.id, 1);
     resetInaccuracy(entry.id);
 
     const updated = getKnowledgeById(entry.id)!;
     expect(updated.status).toBe('active');
     expect(updated.inaccuracy).toBe(0);
-  });
-
-  it('should increase calculated strength', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'Content' });
-    const links = getLinksForEntry(entry.id);
-    const linkedEntries = getLinkedEntries(entry.id);
-
-    const strengthBefore = calculateNetworkStrength(entry, links, linkedEntries);
-
-    recordAccess(entry.id, REINFORCE_ACCESS_BOOST);
-    const updated = getKnowledgeById(entry.id)!;
-    const strengthAfter = calculateNetworkStrength(updated, links, linkedEntries);
-
-    expect(strengthAfter).toBeGreaterThan(strengthBefore);
   });
 });
 
@@ -290,7 +275,8 @@ describe('update + cascade revalidation workflow', () => {
     updateKnowledgeFields(base.id, { content: 'Updated content' });
 
     // Only check derived/depends links
-    const incomingLinks = getIncomingLinks(base.id, REVALIDATION_LINK_TYPES);
+    const revalidationLinkTypes: LinkType[] = ['derived', 'depends', 'elaborates', 'supersedes'];
+    const incomingLinks = getIncomingLinks(base.id, revalidationLinkTypes);
     expect(incomingLinks).toHaveLength(0);
 
     // Related entry should still be active
@@ -755,18 +741,18 @@ describe('list_knowledge pagination', () => {
   it('should return first page with offset 0 and correct total', () => {
     seedEntries(15);
 
-    const total = countKnowledge({ status: 'active', includeWeak: true });
+    const total = countKnowledge({ status: 'active' });
     expect(total).toBe(15);
 
-    const page1 = listKnowledge({ limit: 5, offset: 0, includeWeak: true });
+    const page1 = listKnowledge({ limit: 5, offset: 0 });
     expect(page1).toHaveLength(5);
   });
 
   it('should return second page with offset 5', () => {
     seedEntries(15);
 
-    const page1 = listKnowledge({ limit: 5, offset: 0, sortBy: 'created', includeWeak: true });
-    const page2 = listKnowledge({ limit: 5, offset: 5, sortBy: 'created', includeWeak: true });
+    const page1 = listKnowledge({ limit: 5, offset: 0, sortBy: 'created' });
+    const page2 = listKnowledge({ limit: 5, offset: 5, sortBy: 'created' });
 
     expect(page1).toHaveLength(5);
     expect(page2).toHaveLength(5);
@@ -782,14 +768,14 @@ describe('list_knowledge pagination', () => {
   it('should return partial page when offset near end', () => {
     seedEntries(12);
 
-    const page = listKnowledge({ limit: 5, offset: 10, includeWeak: true });
+    const page = listKnowledge({ limit: 5, offset: 10 });
     expect(page).toHaveLength(2);
   });
 
   it('should return empty when offset past all entries', () => {
     seedEntries(5);
 
-    const page = listKnowledge({ limit: 5, offset: 100, includeWeak: true });
+    const page = listKnowledge({ limit: 5, offset: 100 });
     expect(page).toHaveLength(0);
   });
 
@@ -797,13 +783,13 @@ describe('list_knowledge pagination', () => {
     seedEntries(8, { type: 'fact' });
     seedEntries(4, { type: 'decision' });
 
-    const totalAll = countKnowledge({ includeWeak: true });
+    const totalAll = countKnowledge({});
     expect(totalAll).toBe(12);
 
-    const totalFacts = countKnowledge({ type: 'fact', includeWeak: true });
+    const totalFacts = countKnowledge({ type: 'fact' });
     expect(totalFacts).toBe(8);
 
-    const totalDecisions = countKnowledge({ type: 'decision', includeWeak: true });
+    const totalDecisions = countKnowledge({ type: 'decision' });
     expect(totalDecisions).toBe(4);
   });
 
@@ -811,11 +797,11 @@ describe('list_knowledge pagination', () => {
     seedEntries(8, { type: 'fact' });
     seedEntries(4, { type: 'decision' });
 
-    const total = countKnowledge({ type: 'fact', includeWeak: true });
+    const total = countKnowledge({ type: 'fact' });
     expect(total).toBe(8);
 
-    const page1 = listKnowledge({ type: 'fact', limit: 5, offset: 0, includeWeak: true });
-    const page2 = listKnowledge({ type: 'fact', limit: 5, offset: 5, includeWeak: true });
+    const page1 = listKnowledge({ type: 'fact', limit: 5, offset: 0 });
+    const page2 = listKnowledge({ type: 'fact', limit: 5, offset: 5 });
 
     expect(page1).toHaveLength(5);
     expect(page2).toHaveLength(3);
@@ -829,8 +815,8 @@ describe('list_knowledge pagination', () => {
   it('should use default offset of 0 when not specified', () => {
     seedEntries(10);
 
-    const withOffset = listKnowledge({ limit: 5, offset: 0, includeWeak: true });
-    const withoutOffset = listKnowledge({ limit: 5, includeWeak: true });
+    const withOffset = listKnowledge({ limit: 5, offset: 0 });
+    const withoutOffset = listKnowledge({ limit: 5 });
 
     expect(withOffset.map((e) => e.id)).toEqual(withoutOffset.map((e) => e.id));
   });
@@ -873,7 +859,7 @@ describe('flag_reason workflow', () => {
 
     flagForRevalidation(entry.id, 'Deployment steps changed');
 
-    const results = searchKnowledge({ query: 'deployment', includeWeak: true });
+    const results = searchKnowledge({ query: 'deployment' });
     const found = results.find((r) => r.id === entry.id);
     expect(found).toBeDefined();
     expect(found!.flag_reason).toBe('Deployment steps changed');
@@ -888,7 +874,7 @@ describe('flag_reason workflow', () => {
 
     flagForRevalidation(entry.id, 'Information is incorrect');
 
-    const results = listKnowledge({ includeWeak: true });
+    const results = listKnowledge({});
     const found = results.find((r) => r.id === entry.id);
     expect(found).toBeDefined();
     expect(found!.flag_reason).toBe('Information is incorrect');

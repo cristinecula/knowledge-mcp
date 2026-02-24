@@ -13,7 +13,6 @@ export interface WikiEntry {
   declaration: string | null;
   flag_reason: string | null;
   parent_page_id: string | null;
-  strength: number;
   inaccuracy: number;
   access_count: number;
   created_at: string;
@@ -31,6 +30,12 @@ export interface WikiLink {
 
 export async function fetchWikiEntries(): Promise<WikiEntry[]> {
   const res = await fetch('/api/wiki');
+  const data = await res.json();
+  return data.entries || [];
+}
+
+export async function fetchKbEntries(): Promise<WikiEntry[]> {
+  const res = await fetch('/api/kb-entries');
   const data = await res.json();
   return data.entries || [];
 }

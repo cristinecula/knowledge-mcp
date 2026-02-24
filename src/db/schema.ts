@@ -20,7 +20,6 @@ export function initSchema(db: Database.Database): void {
       content_updated_at TEXT NOT NULL DEFAULT '',
       last_accessed_at TEXT NOT NULL,
       access_count INTEGER NOT NULL DEFAULT 0,
-      strength REAL NOT NULL DEFAULT 1.0,
       status TEXT NOT NULL DEFAULT 'active',
       synced_at TEXT,
       deprecation_reason TEXT,
@@ -30,7 +29,6 @@ export function initSchema(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_type ON knowledge(type);
     CREATE INDEX IF NOT EXISTS idx_knowledge_status ON knowledge(status);
-    CREATE INDEX IF NOT EXISTS idx_knowledge_strength ON knowledge(strength);
     CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge(project);
     CREATE INDEX IF NOT EXISTS idx_knowledge_scope ON knowledge(scope);
 
@@ -168,13 +166,9 @@ function migrateSchema(db: Database.Database): void {
     `);
   }
 
-  // Migration 8: Composite index for the most common query pattern (status + strength filter)
-  const hasStatusStrengthIdx = db.prepare(
-    `SELECT 1 FROM pragma_index_list('knowledge') WHERE name = 'idx_knowledge_status_strength'`,
-  ).get();
-  if (!hasStatusStrengthIdx) {
-    db.exec('CREATE INDEX idx_knowledge_status_strength ON knowledge(status, strength)');
-  }
+  // Migration 8: Composite index for status — strength column removed in migration 13.
+  // This migration is now a no-op but kept for historical continuity.
+  // (Previously created idx_knowledge_status_strength which is dropped in migration 13.)
 
   // Migration 9: Add version and synced_version columns for version-based conflict detection
   if (!columnNames.has('version')) {
@@ -186,7 +180,6 @@ function migrateSchema(db: Database.Database): void {
   }
 
   // Migration 10: Remove dormant status — convert existing dormant entries back to active.
-  // The query layer already filters by strength >= 0.5, so dormant status is redundant.
   // This prevents memory decay from leaking into the sync layer (dormant transitions
   // bumped version numbers, causing spurious sync pushes that overwrote other users' status).
   const hasDormant = db.prepare(
@@ -218,5 +211,105 @@ function migrateSchema(db: Database.Database): void {
   ).get();
   if (needsBackfill) {
     db.exec(`UPDATE knowledge SET content_updated_at = updated_at WHERE content_updated_at = ''`);
+  }
+
+  // Migration 13: Remove strength column and associated indexes.
+  // Strength (brain-inspired memory decay) has been replaced by the explicit inaccuracy
+  // propagation system for tracking content staleness. Access tracking (access_count,
+  // last_accessed_at) is preserved for sorting and analytics.
+  // SQLite doesn't support DROP COLUMN on older versions, so we recreate the table.
+  if (columnNames.has('strength')) {
+    db.exec(`
+      DROP INDEX IF EXISTS idx_knowledge_strength;
+      DROP INDEX IF EXISTS idx_knowledge_status_strength;
+
+      CREATE TABLE knowledge_new (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        tags TEXT NOT NULL DEFAULT '[]',
+        project TEXT,
+        scope TEXT NOT NULL DEFAULT 'company',
+        source TEXT NOT NULL DEFAULT 'unknown',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        content_updated_at TEXT NOT NULL DEFAULT '',
+        last_accessed_at TEXT NOT NULL,
+        access_count INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        synced_at TEXT,
+        deprecation_reason TEXT,
+        declaration TEXT,
+        parent_page_id TEXT,
+        flag_reason TEXT,
+        inaccuracy REAL NOT NULL DEFAULT 0.0,
+        version INTEGER NOT NULL DEFAULT 1,
+        synced_version INTEGER
+      );
+
+      INSERT INTO knowledge_new
+        SELECT id, type, title, content, tags, project, scope, source,
+               created_at, updated_at, content_updated_at, last_accessed_at,
+               access_count, status, synced_at, deprecation_reason,
+               declaration, parent_page_id, flag_reason, inaccuracy,
+               version, synced_version
+        FROM knowledge;
+
+      DROP TABLE knowledge;
+      ALTER TABLE knowledge_new RENAME TO knowledge;
+
+      -- Recreate indexes (excluding strength-related ones)
+      CREATE INDEX idx_knowledge_type ON knowledge(type);
+      CREATE INDEX idx_knowledge_status ON knowledge(status);
+      CREATE INDEX idx_knowledge_project ON knowledge(project);
+      CREATE INDEX idx_knowledge_scope ON knowledge(scope);
+    `);
+
+    // Recreate FTS triggers (they reference the old table which was dropped)
+    const ftsExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge_fts'",
+      )
+      .get();
+
+    if (ftsExists) {
+      db.exec(`
+        DROP TRIGGER IF EXISTS knowledge_ai;
+        DROP TRIGGER IF EXISTS knowledge_ad;
+        DROP TRIGGER IF EXISTS knowledge_au;
+
+        DROP TABLE knowledge_fts;
+
+        CREATE VIRTUAL TABLE knowledge_fts USING fts5(
+          title,
+          content,
+          tags,
+          content='knowledge',
+          content_rowid='rowid'
+        );
+
+        -- Rebuild FTS index from current data
+        INSERT INTO knowledge_fts(rowid, title, content, tags)
+          SELECT rowid, title, content, tags FROM knowledge;
+
+        CREATE TRIGGER knowledge_ai AFTER INSERT ON knowledge BEGIN
+          INSERT INTO knowledge_fts(rowid, title, content, tags)
+          VALUES (NEW.rowid, NEW.title, NEW.content, NEW.tags);
+        END;
+
+        CREATE TRIGGER knowledge_ad AFTER DELETE ON knowledge BEGIN
+          INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content, tags)
+          VALUES ('delete', OLD.rowid, OLD.title, OLD.content, OLD.tags);
+        END;
+
+        CREATE TRIGGER knowledge_au AFTER UPDATE ON knowledge BEGIN
+          INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content, tags)
+          VALUES ('delete', OLD.rowid, OLD.title, OLD.content, OLD.tags);
+          INSERT INTO knowledge_fts(rowid, title, content, tags)
+          VALUES (NEW.rowid, NEW.title, NEW.content, NEW.tags);
+        END;
+      `);
+    }
   }
 }

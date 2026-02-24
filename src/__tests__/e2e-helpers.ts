@@ -266,7 +266,6 @@ export async function queryEntries(
   const result = await callTool(agent, 'query_knowledge', {
     query,
     limit,
-    include_weak: true,
   });
 
   // query_knowledge returns a plain text string when no results are found

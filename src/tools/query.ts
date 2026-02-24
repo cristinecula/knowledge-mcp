@@ -22,9 +22,8 @@ export function registerQueryTool(server: McpServer): void {
     {
       description:
         'Search the shared knowledge base using free-text queries. ' +
-        'Results are ranked by relevance multiplied by memory strength. ' +
-        'Accessing knowledge automatically reinforces it (increases its strength), ' +
-        'so frequently useful knowledge naturally persists. ' +
+        'Results are ranked by relevance. ' +
+        'Accessing knowledge automatically records the access for analytics. ' +
         'Use this to find conventions, decisions, patterns, pitfalls, and other team knowledge. ' +
         'Content is truncated in results — use `get_knowledge` to read full entries.',
       inputSchema: {
@@ -36,12 +35,11 @@ export function registerQueryTool(server: McpServer): void {
           'Scope filter with inheritance: repo returns repo+project+company, ' +
           'project returns project+company, company returns only company-wide',
         ),
-        include_weak: z.boolean().optional().describe('Include weak entries (strength 0.1-0.5) in results. Default: false'),
         above_threshold: z.boolean().optional().describe('Only return entries with inaccuracy above threshold (needs revalidation). Default: false'),
         limit: z.number().min(1).max(50).optional().describe('Max results to return (default: 10, max: 50)'),
       },
     },
-    async ({ query, type, tags, project, scope, include_weak, above_threshold, limit }) => {
+    async ({ query, type, tags, project, scope, above_threshold, limit }) => {
       try {
         const maxResults = limit ?? 10;
 
@@ -52,7 +50,6 @@ export function registerQueryTool(server: McpServer): void {
           tags,
           project,
           scope,
-          includeWeak: include_weak,
           aboveThreshold: above_threshold,
           limit: maxResults * 2, // fetch more for merging
         });
@@ -69,7 +66,6 @@ export function registerQueryTool(server: McpServer): void {
               tags,
               project,
               scope,
-              includeWeak: include_weak,
               aboveThreshold: above_threshold,
               limit: 200, // broad pool for vector search
             });
@@ -145,7 +141,6 @@ export function registerQueryTool(server: McpServer): void {
             tags: entry.tags,
             project: entry.project,
             scope: entry.scope,
-            strength: Math.round(entry.strength * 1000) / 1000,
             status: entry.status,
             access_count: entry.access_count + 1, // reflect the access we just recorded
             last_accessed_at: new Date().toISOString(),

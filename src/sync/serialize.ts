@@ -2,7 +2,7 @@
  * Serialize/deserialize knowledge entries and links to/from JSON.
  *
  * Shared fields are included in JSON files. Personal/local fields
- * (strength, access_count, last_accessed_at, synced_at, embeddings)
+ * (access_count, last_accessed_at, synced_at, embeddings)
  * are stripped on export and not expected on import.
  *
  * SECURITY: parseEntryJSON and parseLinkJSON validate all fields from
@@ -64,7 +64,7 @@ export interface LinkJSON {
 
 /**
  * Convert a KnowledgeEntry to its JSON file representation.
- * Strips local-only fields (strength, access_count, etc.).
+ * Strips local-only fields (access_count, etc.).
  */
 export function entryToJSON(entry: KnowledgeEntry): EntryJSON {
   const json: EntryJSON = {

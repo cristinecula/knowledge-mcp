@@ -1,13 +1,12 @@
 # knowledge-mcp
 
-A shared agent knowledge system exposed as an [MCP](https://modelcontextprotocol.io/) server. It gives AI agents (and humans) a persistent, queryable knowledge base with brain-inspired memory dynamics — frequently accessed knowledge stays strong, unused knowledge fades, and well-connected knowledge reinforces itself.
+A shared agent knowledge system exposed as an [MCP](https://modelcontextprotocol.io/) server. It gives AI agents (and humans) a persistent, queryable knowledge base with associative linking and cascade revalidation — when knowledge changes, dependent entries are automatically flagged for review.
 
 Built for teams where multiple agents work across many repositories. Store conventions, architectural decisions, patterns, pitfalls, debugging notes, and process documentation in one place, and let agents query it as they work.
 
 ## Features
 
-- **Brain-inspired memory decay** — Entries start at full strength and decay with a 14-day half-life. Accessing knowledge reinforces it. Deprecated entries decay 10x faster.
-- **Associative knowledge graph** — Link entries with typed relationships (depends, derived, elaborates, contradicts, supersedes, related). Connected entries reinforce each other's strength via spreading activation.
+- **Associative knowledge graph** — Link entries with typed relationships (depends, derived, elaborates, contradicts, supersedes, related). When an entry is updated, linked entries accumulate inaccuracy based on how closely they are connected.
 - **Cascade revalidation** — When a knowledge entry is updated, entries that depend on it or are derived from it are automatically flagged as "needs revalidation."
 - **Full-text search** — FTS5-powered keyword search across titles, content, and tags.
 - **Semantic search** — Optional vector similarity search using local embeddings or OpenAI. Results are merged with keyword search via Reciprocal Rank Fusion.
@@ -15,7 +14,7 @@ Built for teams where multiple agents work across many repositories. Store conve
 - **Hierarchical scoping** — Entries can be scoped to company, project, or repo. Queries inherit upward (repo queries include project and company knowledge).
 - **Git-based team sync** — Share knowledge across a team via a git repo. JSON files are the source of truth; local SQLite acts as a personal index. Conflict detection keeps both versions and lets agents resolve naturally.
 - **Entry version history** — When git sync is configured, inspect the full commit history of any entry and retrieve its content at any point in time.
-- **11 MCP tools** — Store, query, list, reinforce, deprecate, link, update, delete, sync knowledge, plus entry version history.
+- **13 MCP tools** — Store, query, list, get, reinforce, deprecate, link, update, delete, sync knowledge, flag for revalidation, plus entry version history.
 
 ## Installation
 
@@ -241,10 +240,10 @@ Search the knowledge base using free-text queries. Combines FTS5 keyword search 
 Browse and filter entries without a search query. Filter by type, project, scope, or status. Does not auto-reinforce.
 
 ### `reinforce_knowledge`
-Explicitly boost an entry's memory strength (+3 access boost). Clears the "needs revalidation" flag if present.
+Explicitly revalidate an entry, resetting its inaccuracy score to 0. Use this when you verify an entry is still accurate.
 
 ### `deprecate_knowledge`
-Mark an entry as deprecated. It decays 10x faster and fades from query results — like a fading memory. The entry is not deleted.
+Mark an entry as deprecated. Deprecated entries are excluded from default query results. The entry is not deleted.
 
 ### `delete_knowledge`
 Permanently delete an entry and all its associated links and embeddings. Irreversible. Use for entries created by mistake.
@@ -271,7 +270,7 @@ The sync layer enables team knowledge sharing via a shared git repository. Each 
 ### How it works
 
 - **Source of truth:** JSON files in the git repo (`entries/{type}/{id}.json`, `links/{id}.json`)
-- **Local DB:** SQLite acts as a personal index/cache. Memory fields (strength, access count, last accessed) stay local — each person's memory is personal.
+- **Local DB:** SQLite acts as a personal index/cache. Local-only fields (access count, last accessed) stay local — each person's usage is personal.
 - **Write-through:** Every local write (store, update, delete, link, deprecate) is immediately written to the repo as JSON files and committed (`git commit`).
 - **Pull on startup:** When the server starts, it pulls all changes from the configured repos into the local DB.
 - **Manual sync:** Use the `sync_knowledge` tool to pull/push mid-session.
@@ -316,29 +315,16 @@ node build/index.js --sync-config config.json
 
 ## Architecture
 
-### Memory Model
+### Inaccuracy Model
 
-Strength is calculated as:
+When a knowledge entry is updated, linked entries accumulate inaccuracy based on the change magnitude and link type weights. Entries whose inaccuracy exceeds a configurable threshold are flagged as "needs revalidation." Reinforcing an entry resets its inaccuracy to 0.
 
-```
-baseStrength = decayFactor * accessBoost
-decayFactor  = 0.5 ^ (timeSinceLastAccess / HALF_LIFE)
-accessBoost  = 1 + log2(1 + accessCount)
-```
-
-Network-enhanced strength adds a bonus from linked entries via spreading activation, capped at 50% of base strength:
-
-```
-networkBonus = sum(linkedBaseStrength * linkTypeWeight)
-finalStrength = baseStrength + min(networkBonus, baseStrength * 0.5)
-```
-
-**Link type weights:** depends (0.3), derived (0.2), elaborates (0.2), contradicts (0.15), supersedes (0.15), related (0.1).
+**Inaccuracy link type weights:** depends (0.8), derived (0.6), elaborates (0.5), supersedes (0.4), contradicts (0.3), related (0.1).
 
 **Status transitions:**
-- `active` — default status; entries with strength < 0.5 are filtered from queries automatically
-- `needs_revalidation` — flagged by cascade revalidation
-- `deprecated` — manually deprecated, decays 10x faster
+- `active` — default status
+- `needs_revalidation` — virtual status for entries with inaccuracy above threshold
+- `deprecated` — manually deprecated, excluded from default query results
 
 ### Data Model
 
@@ -361,7 +347,7 @@ Queries at a given scope automatically inherit entries from broader scopes.
 
 When the server is running, open `http://localhost:3333` to view the knowledge graph. The D3.js force-directed graph shows:
 
-- **Nodes** — Color-coded by knowledge type, sized by strength
+- **Nodes** — Color-coded by knowledge type, sized by access count
 - **Edges** — Typed and labeled link relationships
 - **Sidebar** — Click a node to inspect its details, including rendered markdown content and collapsible version history (when git sync is configured)
 - **Filters** — Filter by type, scope, status, or project (dynamic dropdown populated from your entries)
@@ -393,9 +379,6 @@ src/
     connection.ts       # SQLite connection (WAL mode, auto-create)
     schema.ts           # DDL: tables, indexes, FTS5, triggers
     queries.ts          # All CRUD, search, link, embedding queries
-  memory/
-    strength.ts         # Base + network strength calculations
-    maintenance.ts      # Periodic sweep: recalculate strengths
   tools/
     store.ts            # store_knowledge
     query.ts            # query_knowledge
@@ -428,14 +411,13 @@ src/
     handler.ts          # API routes + static file serving
     static/             # D3.js graph UI (HTML, JS, CSS)
   __tests__/
-    db.test.ts          # Database layer tests (50 tests)
-    memory.test.ts      # Memory model tests (15 tests)
-    tools.test.ts       # Tool integration tests (26 tests)
-    similarity.test.ts  # Similarity/RRF math tests (12 tests)
-    sync.test.ts        # Sync layer tests (32 tests)
-    e2e-sync.test.ts    # End-to-end sync tests with real git repos (58 tests)
-    e2e-helpers.ts      # E2E test infrastructure (11 helper functions)
-    history.test.ts     # Entry version history tests (17 tests)
+    db.test.ts          # Database layer tests
+    tools.test.ts       # Tool integration tests
+    similarity.test.ts  # Similarity/RRF math tests
+    sync.test.ts        # Sync layer tests
+    e2e-sync.test.ts    # End-to-end sync tests with real git repos
+    e2e-helpers.ts      # E2E test infrastructure
+    history.test.ts     # Entry version history tests
 ```
 
 ## License

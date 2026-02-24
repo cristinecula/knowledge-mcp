@@ -12,8 +12,7 @@ export function registerStoreTool(server: McpServer): void {
       description:
         'Store a new piece of knowledge in the shared knowledge base. Knowledge can be ' +
         'conventions, decisions, patterns, pitfalls, facts, debug notes, or process ' +
-        'documentation. Entries start with full strength (1.0) and will naturally decay ' +
-        'over time unless accessed. Optionally link this entry to existing entries.',
+        'documentation. Optionally link this entry to existing entries.',
       inputSchema: {
         title: z.string().describe('Short summary of the knowledge (1-2 sentences)'),
         content: z.string().describe('Full content in markdown format'),

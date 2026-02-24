@@ -4,7 +4,6 @@ import {
   insertKnowledge,
   getKnowledgeById,
   updateKnowledgeFields,
-  updateStrength,
   updateStatus,
   recordAccess,
   searchKnowledge,
@@ -54,7 +53,6 @@ describe('insertKnowledge', () => {
     expect(entry.project).toBeNull();
     expect(entry.scope).toBe('company');
     expect(entry.source).toBe('unknown');
-    expect(entry.strength).toBe(1.0);
     expect(entry.status).toBe('active');
     expect(entry.access_count).toBe(0);
   });
@@ -151,21 +149,6 @@ describe('updateKnowledgeFields', () => {
     expect(new Date(updated!.updated_at).getTime()).toBeGreaterThanOrEqual(
       new Date(entry.created_at).getTime(),
     );
-  });
-});
-
-describe('updateStrength', () => {
-  it('should update strength value', () => {
-    const entry = insertKnowledge({
-      type: 'fact',
-      title: 'Test',
-      content: 'Content',
-    });
-    expect(entry.strength).toBe(1.0);
-
-    updateStrength(entry.id, 0.75);
-    const found = getKnowledgeById(entry.id);
-    expect(found!.strength).toBe(0.75);
   });
 });
 
@@ -310,17 +293,6 @@ describe('searchKnowledge (filters)', () => {
     const results = searchKnowledge({ query: 'test', tags: ['react', 'auth'] });
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe('A');
-  });
-
-  it('should exclude weak entries by default (strength < 0.5)', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Weak', content: 'test' });
-    updateStrength(entry.id, 0.3);
-
-    const results = searchKnowledge({ query: 'test' });
-    expect(results).toHaveLength(0);
-
-    const resultsWithWeak = searchKnowledge({ query: 'test', includeWeak: true });
-    expect(resultsWithWeak).toHaveLength(1);
   });
 
   it('should exclude deprecated entries by default', () => {

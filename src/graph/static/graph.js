@@ -206,10 +206,10 @@ function render(data) {
     return;
   }
 
-  // Compute node sizes based on strength (min 6, max 30)
-  const strengthExtent = d3.extent(filtered.nodes, d => d.strength);
+  // Compute node sizes based on access_count (min 6, max 30)
+  const accessExtent = d3.extent(filtered.nodes, d => d.access_count || 1);
   const radiusScale = d3.scaleSqrt()
-    .domain([Math.min(strengthExtent[0], 0.1), Math.max(strengthExtent[1], 1)])
+    .domain([Math.min(accessExtent[0], 1), Math.max(accessExtent[1], 10)])
     .range([6, 30]);
 
   // Build simulation
@@ -217,7 +217,7 @@ function render(data) {
     .force('link', d3.forceLink(filtered.links).id(d => d.id).distance(100))
     .force('charge', d3.forceManyBody().strength(-200))
     .force('center', d3.forceCenter(window.innerWidth / 2, window.innerHeight / 2))
-    .force('collision', d3.forceCollide().radius(d => radiusScale(d.strength) + 5));
+    .force('collision', d3.forceCollide().radius(d => radiusScale(d.access_count || 1) + 5));
 
   // Draw links
   const link = zoomGroup.append('g')
@@ -236,7 +236,7 @@ function render(data) {
     .selectAll('circle')
     .data(filtered.nodes)
     .join('circle')
-    .attr('r', d => radiusScale(d.strength))
+    .attr('r', d => radiusScale(d.access_count || 1))
     .attr('fill', d => TYPE_COLORS[d.type] || '#8b949e')
     .style('cursor', 'pointer')
     .call(drag(simulation));
@@ -252,7 +252,7 @@ function render(data) {
     .data(filtered.nodes)
     .join('text')
     .attr('class', 'node-label')
-    .attr('dy', d => radiusScale(d.strength) + 14)
+    .attr('dy', d => radiusScale(d.access_count || 1) + 14)
     .text(d => d.title.length > 30 ? d.title.slice(0, 28) + '...' : d.title);
 
   // Apply visual attributes (opacity, stroke, etc.) based on current state
@@ -264,7 +264,7 @@ function render(data) {
       tooltip.style.display = 'block';
       tooltip.querySelector('.tt-title').textContent = d.title;
       tooltip.querySelector('.tt-meta').textContent =
-        `${d.type} | strength: ${d.strength.toFixed(3)} | ${d.status}` +
+        `${d.type} | accesses: ${d.access_count || 0} | ${d.status}` +
         ((d.inaccuracy || 0) > 0 ? ` | inaccuracy: ${d.inaccuracy.toFixed(3)}` : '');
     })
     .on('mousemove', (event) => {
@@ -400,9 +400,6 @@ async function showSidebar(id) {
   const { entry, links } = detail;
   const color = TYPE_COLORS[entry.type] || '#8b949e';
 
-  const strengthPct = Math.min(100, Math.max(0, entry.strength * 100));
-  const strengthColor = entry.strength >= 0.5 ? '#3fb950' : entry.strength >= 0.1 ? '#d29922' : '#f85149';
-
   const inaccuracy = entry.inaccuracy || 0;
   const inaccuracyPct = Math.min(100, Math.max(0, (inaccuracy / 1.0) * 100));
   const inaccuracyColor = inaccuracy >= 1.0 ? '#f85149' : inaccuracy >= 0.5 ? '#d29922' : '#3fb950';
@@ -420,15 +417,6 @@ async function showSidebar(id) {
       ${entry.project ? `<span>Project: ${escapeHtml(entry.project)}</span>` : ''}
       <span>Accessed: ${entry.access_count}x</span>
       <span>Source: ${escapeHtml(entry.source)}</span>
-    </div>
-    <div>
-      <div style="display:flex;justify-content:space-between;font-size:12px;color:#8b949e;margin-bottom:4px">
-        <span>Strength</span>
-        <span>${entry.strength.toFixed(3)}</span>
-      </div>
-      <div class="strength-bar">
-        <div class="strength-fill" style="width:${strengthPct}%;background:${strengthColor}"></div>
-      </div>
     </div>
     <div>
       <div style="display:flex;justify-content:space-between;font-size:12px;color:#8b949e;margin-bottom:4px">

@@ -38,8 +38,8 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
   const id = randomUUID();
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, declaration, parent_page_id, version, synced_version)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active', NULL, ?, ?, 1, NULL)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, status, synced_at, declaration, parent_page_id, version, synced_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', NULL, ?, ?, 1, NULL)
   `);
 
   stmt.run(
@@ -132,14 +132,6 @@ export function updateKnowledgeFields(
   return getKnowledgeById(id);
 }
 
-export function updateStrength(id: string, strength: number): void {
-  const db = getDb();
-  db.prepare('UPDATE knowledge SET strength = ? WHERE id = ?').run(
-    strength,
-    id,
-  );
-}
-
 export function updateStatus(id: string, status: Status): void {
   const db = getDb();
   const now = new Date().toISOString();
@@ -222,10 +214,9 @@ export interface SearchParams {
   tags?: string[];
   project?: string;
   scope?: Scope;
-  includeWeak?: boolean;
   status?: string;
   aboveThreshold?: boolean;
-  sortBy?: 'strength' | 'recent' | 'created';
+  sortBy?: 'relevance' | 'recent' | 'created';
   limit?: number;
   offset?: number;
 }
@@ -290,10 +281,7 @@ export function searchKnowledge(params: SearchParams): KnowledgeEntry[] {
 
   // Status filter
   if (params.status && params.status !== 'all') {
-    if (params.status === 'weak') {
-      sql += ' AND k.status = ? AND k.strength >= 0.1 AND k.strength < 0.5';
-      bindings.push('active');
-    } else if (params.status === 'needs_revalidation') {
+    if (params.status === 'needs_revalidation') {
       // Virtual filter: active entries with inaccuracy above threshold
       sql += ' AND k.status = ? AND k.inaccuracy >= ?';
       bindings.push('active', INACCURACY_THRESHOLD);
@@ -304,10 +292,6 @@ export function searchKnowledge(params: SearchParams): KnowledgeEntry[] {
   } else if (params.status !== 'all') {
     // By default, show active entries
     sql += ` AND k.status = 'active'`;
-
-    if (!params.includeWeak) {
-      sql += ` AND k.strength >= 0.5`;
-    }
   }
 
   // Above-threshold filter (can combine with other filters)
@@ -317,11 +301,11 @@ export function searchKnowledge(params: SearchParams): KnowledgeEntry[] {
   }
 
   // Sort
-  const sortBy = params.sortBy ?? 'strength';
-  if (sortBy === 'strength' && params.query) {
-    sql += ' ORDER BY (k.strength * (-rank)) DESC';
-  } else if (sortBy === 'strength') {
-    sql += ' ORDER BY k.strength DESC';
+  const sortBy = params.sortBy ?? 'relevance';
+  if (sortBy === 'relevance' && params.query) {
+    sql += ' ORDER BY (-rank) DESC';
+  } else if (sortBy === 'relevance') {
+    sql += ' ORDER BY k.last_accessed_at DESC';
   } else if (sortBy === 'recent') {
     sql += ' ORDER BY k.last_accessed_at DESC';
   } else {
@@ -387,10 +371,7 @@ export function countKnowledge(params: SearchParams): number {
 
   // Status filter (same logic as searchKnowledge)
   if (params.status && params.status !== 'all') {
-    if (params.status === 'weak') {
-      sql += ' AND k.status = ? AND k.strength >= 0.1 AND k.strength < 0.5';
-      bindings.push('active');
-    } else if (params.status === 'needs_revalidation') {
+    if (params.status === 'needs_revalidation') {
       sql += ' AND k.status = ? AND k.inaccuracy >= ?';
       bindings.push('active', INACCURACY_THRESHOLD);
     } else {
@@ -399,10 +380,6 @@ export function countKnowledge(params: SearchParams): number {
     }
   } else if (params.status !== 'all') {
     sql += ` AND k.status = 'active'`;
-
-    if (!params.includeWeak) {
-      sql += ` AND k.strength >= 0.5`;
-    }
   }
 
   // Above-threshold filter
@@ -656,7 +633,6 @@ export interface GraphData {
     type: string;
     scope: string;
     project: string | null;
-    strength: number;
     status: string;
     inaccuracy: number;
     access_count: number;
@@ -693,7 +669,6 @@ export function getGraphData(): GraphData {
       type: e.type,
       scope: e.scope,
       project: e.project,
-      strength: e.strength,
       status: e.status,
       inaccuracy: e.inaccuracy ?? 0,
       access_count: e.access_count,
@@ -767,8 +742,8 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
   const version = params.version ?? 1;
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, flag_reason, declaration, parent_page_id, inaccuracy, version, synced_version)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, status, synced_at, deprecation_reason, flag_reason, declaration, parent_page_id, inaccuracy, version, synced_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(

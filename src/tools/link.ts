@@ -10,8 +10,8 @@ export function registerLinkTool(server: McpServer): void {
     {
       description:
         'Create a typed link between two knowledge entries. Links form an associative ' +
-        'knowledge graph where connected entries reinforce each other\'s memory strength. ' +
-        'Well-connected knowledge is more robust and harder to forget. ' +
+        'knowledge graph. Linked entries propagate inaccuracy to each other when updated, ' +
+        'helping keep dependent knowledge flagged for review. ' +
         'Link types: related (general association), derived (deduced from source), ' +
         'depends (requires source to be true), contradicts (conflicts with source), ' +
         'supersedes (replaces source), elaborates (adds detail to source).',

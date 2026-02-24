@@ -58,7 +58,6 @@ export interface KnowledgeEntry {
   content_updated_at: string;
   last_accessed_at: string;
   access_count: number;
-  strength: number;
   status: Status;
   synced_at: string | null;
   deprecation_reason: string | null;
@@ -85,7 +84,6 @@ export interface KnowledgeRow {
   content_updated_at: string;
   last_accessed_at: string;
   access_count: number;
-  strength: number;
   status: string;
   synced_at: string | null;
   deprecation_reason: string | null;
@@ -119,35 +117,6 @@ export interface KnowledgeLinkRow {
 }
 
 // === Constants ===
-
-/** Half-life in milliseconds (14 days) */
-export const HALF_LIFE_MS = 14 * 24 * 60 * 60 * 1000;
-
-/** Deprecated entries decay 10x faster */
-export const DEPRECATED_DECAY_MULTIPLIER = 10;
-
-/** Strength thresholds */
-export const STRENGTH_ACTIVE_THRESHOLD = 0.5;
-
-/** Link type weights for network strength calculation */
-export const LINK_WEIGHTS: Record<LinkType, number> = {
-  depends: 0.3,
-  derived: 0.2,
-  elaborates: 0.2,
-  contradicts: 0.15,
-  supersedes: 0.15,
-  related: 0.1,
-  conflicts_with: 0,
-};
-
-/** Maximum network bonus as a fraction of base strength */
-export const MAX_NETWORK_BONUS_RATIO = 0.5;
-
-/** Access count boost for explicit reinforcement */
-export const REINFORCE_ACCESS_BOOST = 3;
-
-/** Link types that trigger revalidation on update — DEPRECATED, use INACCURACY_LINK_WEIGHTS */
-export const REVALIDATION_LINK_TYPES: LinkType[] = ['derived', 'depends'];
 
 // === Inaccuracy Propagation Constants ===
 

@@ -126,7 +126,6 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       const ftsEntries = searchKnowledge({
         query,
         limit: limit * 2,
-        includeWeak: true,
         status: 'all',
       });
 
@@ -139,7 +138,6 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
           // Broad candidate pool for vector search
           const candidates = searchKnowledge({
             limit: 200,
-            includeWeak: true,
             status: 'all',
           });
 
@@ -247,7 +245,6 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       const entries = searchKnowledge({
         type: 'wiki',
         limit: 250,
-        includeWeak: true,
         status: 'all',
         sortBy: 'recent',
       });

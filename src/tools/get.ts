@@ -45,7 +45,6 @@ export function registerGetTool(server: McpServer): void {
           tags: entry.tags,
           project: entry.project,
           scope: entry.scope,
-          strength: Math.round(entry.strength * 1000) / 1000,
           status: entry.status,
           access_count: entry.access_count + 1,
           last_accessed_at: new Date().toISOString(),

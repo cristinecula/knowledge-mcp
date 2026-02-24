@@ -10,8 +10,7 @@ You have access to a shared knowledge base via MCP tools:
 - **Sync:** \`sync_knowledge\` (git sync is recommended for team use and persistent history)
 - **History:** \`get_entry_history\`, \`get_entry_at_version\` (requires git sync)
 
-Use it as persistent memory across sessions. Knowledge that is frequently
-accessed stays strong; unused knowledge naturally fades.
+Use it as persistent memory across sessions.
 
 ## Reading knowledge efficiently
 
@@ -21,7 +20,7 @@ accessed stays strong; unused knowledge naturally fades.
   Use it when you need to read the complete content after finding an entry via search.
 - \`list_knowledge\` returns **metadata only** (no content). Use it to browse entries
   by type, project, scope, or status.
-- Both \`query_knowledge\` and \`get_knowledge\` auto-reinforce entries (boost memory strength).
+- Both \`query_knowledge\` and \`get_knowledge\` auto-record access for analytics.
 
 ## When starting a session
 
@@ -49,7 +48,7 @@ accessed stays strong; unused knowledge naturally fades.
 
 ## When confirming existing knowledge
 
-- Reinforce entries you verify are still accurate. This keeps useful knowledge from decaying.
+- Reinforce entries you verify are still accurate. This resets their inaccuracy score to 0.
 
 ## When finding outdated knowledge
 
@@ -79,7 +78,7 @@ inaccuracy automatically propagates to dependent entries through the knowledge g
 
 ## Wiki entries
 
-- Wiki entries (\`type: "wiki"\`) are curated documentation pages that are exempt from memory decay.
+- Wiki entries (\`type: "wiki"\`) are curated documentation pages.
 - Wiki entries may have a **declaration** — a human-written prompt describing what the page should
   contain (e.g., tone, length, audience, focus). The declaration is visible in \`query_knowledge\`
   and \`list_knowledge\` results, and is shown after \`update_knowledge\` completes.

@@ -18,7 +18,6 @@ function mockEntry(id: string, title: string = 'Test'): KnowledgeEntry {
     content_updated_at: new Date().toISOString(),
     last_accessed_at: new Date().toISOString(),
     access_count: 0,
-    strength: 1.0,
     status: 'active',
     synced_at: null,
     deprecation_reason: null,
