@@ -24,6 +24,7 @@ function mockEntry(id: string, title: string = 'Test'): KnowledgeEntry {
     deprecation_reason: null,
     declaration: null,
     parent_page_id: null,
+    flag_reason: null,
     version: 1,
     synced_version: null,
   };

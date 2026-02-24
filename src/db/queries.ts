@@ -158,6 +158,21 @@ export function deprecateKnowledge(id: string, reason?: string): KnowledgeEntry 
   return getKnowledgeById(id);
 }
 
+/**
+ * Flag a knowledge entry for revalidation (human "flag as inaccurate").
+ * Sets status to 'needs_revalidation' and optionally stores the reason.
+ * Returns the updated entry, or null if not found.
+ */
+export function flagForRevalidation(id: string, reason?: string): KnowledgeEntry | null {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const result = db.prepare(
+    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ?, flag_reason = ?, version = version + 1 WHERE id = ?',
+  ).run('needs_revalidation', now, now, reason ?? null, id);
+  if (result.changes === 0) return null;
+  return getKnowledgeById(id);
+}
+
 export function recordAccess(id: string, boost: number = 1): void {
   const db = getDb();
   const now = new Date().toISOString();
@@ -715,6 +730,7 @@ export interface ImportKnowledgeParams {
   source?: string;
   status?: Status;
   deprecation_reason?: string | null;
+  flag_reason?: string | null;
   declaration?: string | null;
   parent_page_id?: string | null;
   created_at: string;
@@ -727,8 +743,8 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
   const version = params.version ?? 1;
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, declaration, parent_page_id, version, synced_version)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, flag_reason, declaration, parent_page_id, version, synced_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -747,6 +763,7 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
     params.status ?? 'active',
     now,                  // synced_at = now
     params.deprecation_reason ?? null,
+    params.flag_reason ?? null,
     params.declaration ?? null,
     params.parent_page_id ?? null,
     version,
@@ -809,6 +826,7 @@ export function updateKnowledgeContent(
     source?: string;
     status?: Status;
     deprecation_reason?: string | null;
+    flag_reason?: string | null;
     declaration?: string | null;
     parent_page_id?: string | null;
     version?: number;
@@ -860,6 +878,10 @@ export function updateKnowledgeContent(
   if (fields.deprecation_reason !== undefined) {
     sets.push('deprecation_reason = ?');
     values.push(fields.deprecation_reason);
+  }
+  if (fields.flag_reason !== undefined) {
+    sets.push('flag_reason = ?');
+    values.push(fields.flag_reason);
   }
   if (fields.declaration !== undefined) {
     sets.push('declaration = ?');

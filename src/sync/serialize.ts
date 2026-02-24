@@ -43,6 +43,7 @@ export interface EntryJSON {
   source: string;
   status: Status;
   deprecation_reason?: string | null;
+  flag_reason?: string | null;
   declaration?: string | null;
   parent_page_id?: string | null;
   created_at: string;
@@ -82,6 +83,11 @@ export function entryToJSON(entry: KnowledgeEntry): EntryJSON {
   // Only include deprecation_reason when it has a value (keep JSON clean)
   if (entry.deprecation_reason) {
     json.deprecation_reason = entry.deprecation_reason;
+  }
+
+  // Only include flag_reason when it has a value (keep JSON clean)
+  if (entry.flag_reason) {
+    json.flag_reason = entry.flag_reason;
   }
 
   // Only include declaration when it has a value (keep JSON clean)
@@ -162,6 +168,9 @@ export function parseEntryJSON(data: unknown): EntryJSON {
   // Deprecation reason must be a string or null/undefined
   const deprecation_reason = typeof obj.deprecation_reason === 'string' ? obj.deprecation_reason : null;
 
+  // Flag reason must be a string or null/undefined
+  const flag_reason = typeof obj.flag_reason === 'string' ? obj.flag_reason : null;
+
   // Declaration must be a string or null/undefined
   const declaration = typeof obj.declaration === 'string' ? obj.declaration : null;
 
@@ -196,6 +205,11 @@ export function parseEntryJSON(data: unknown): EntryJSON {
   // Only include deprecation_reason when it has a value
   if (deprecation_reason) {
     result.deprecation_reason = deprecation_reason;
+  }
+
+  // Only include flag_reason when it has a value
+  if (flag_reason) {
+    result.flag_reason = flag_reason;
   }
 
   // Only include declaration when it has a value

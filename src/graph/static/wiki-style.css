@@ -426,6 +426,30 @@ body {
   border-color: var(--wiki-btn-danger-text);
 }
 
+.wiki-btn-warning {
+  background: transparent;
+  border-color: var(--wiki-btn-danger-border);
+  color: var(--wiki-warning);
+}
+
+.wiki-btn-warning:hover {
+  background: rgba(154, 103, 0, 0.08);
+  border-color: var(--wiki-warning);
+}
+
+/* Flag banner (shown when entry is flagged as inaccurate) */
+.wiki-flag-banner {
+  background: rgba(154, 103, 0, 0.08);
+  border: 1px solid var(--wiki-warning);
+  border-left: 3px solid var(--wiki-warning);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--wiki-warning);
+  line-height: 1.4;
+}
+
 .wiki-btn-sm {
   padding: 3px 10px;
   font-size: 12px;

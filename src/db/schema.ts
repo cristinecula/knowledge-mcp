@@ -196,6 +196,11 @@ function migrateSchema(db: Database.Database): void {
     db.exec(`UPDATE knowledge SET status = 'active' WHERE status = 'dormant'`);
   }
 
+  // Migration 11: Add flag_reason column (for human "flag as inaccurate" on wiki pages)
+  if (!columnNames.has('flag_reason')) {
+    db.exec(`ALTER TABLE knowledge ADD COLUMN flag_reason TEXT`);
+  }
+
   // Backfill: ensure content_updated_at is set for any rows where it's empty.
   // Only run if there are actually rows to fix (avoids full-table scan on every startup).
   const needsBackfill = db.prepare(

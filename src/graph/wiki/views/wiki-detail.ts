@@ -7,6 +7,7 @@ import {
   fetchEntry,
   fetchWikiEntries,
   deleteWikiEntry,
+  flagWikiEntry,
   type WikiEntry,
   type WikiLink,
 } from '../api.js';
@@ -101,6 +102,18 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
     }
   };
 
+  const handleFlag = async () => {
+    const reason = prompt(
+      'Flag this page as inaccurate.\n\nOptionally describe what is wrong (or leave blank):',
+    );
+    // prompt returns null on Cancel
+    if (reason === null) return;
+    const result = await flagWikiEntry(entry.id, reason || undefined);
+    if (result.entry) {
+      setEntry(result.entry);
+    }
+  };
+
   return html`
     <div class="wiki-detail">
       <!-- Breadcrumbs -->
@@ -152,6 +165,12 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
             Edit
           </button>
           <button
+            class="wiki-btn wiki-btn-sm wiki-btn-warning"
+            @click=${handleFlag}
+          >
+            Flag
+          </button>
+          <button
             class="wiki-btn wiki-btn-sm wiki-btn-danger"
             @click=${handleDelete}
           >
@@ -171,6 +190,15 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
           <span>Updated ${timeAgo(entry.updated_at)}</span>
         `}
       ></div>
+
+      <!-- Flag warning banner -->
+      ${entry.flag_reason != null
+        ? html`<div class="wiki-flag-banner">
+            <strong>Flagged as inaccurate</strong>${entry.flag_reason
+              ? html`: ${entry.flag_reason}`
+              : null}
+          </div>`
+        : null}
 
       <!-- Tags -->
       ${entry.tags && entry.tags.length > 0

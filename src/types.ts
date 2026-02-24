@@ -63,6 +63,7 @@ export interface KnowledgeEntry {
   status: Status;
   synced_at: string | null;
   deprecation_reason: string | null;
+  flag_reason: string | null;
   declaration: string | null;
   parent_page_id: string | null;
   version: number;
@@ -88,6 +89,7 @@ export interface KnowledgeRow {
   status: string;
   synced_at: string | null;
   deprecation_reason: string | null;
+  flag_reason: string | null;
   declaration: string | null;
   parent_page_id: string | null;
   version: number;

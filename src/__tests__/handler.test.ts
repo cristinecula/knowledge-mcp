@@ -434,3 +434,52 @@ describe('Wiki API — hierarchy integration', () => {
     expect(data.entry.parent_page_id).toBe(b.id);
   });
 });
+
+describe('Wiki API — POST /api/wiki/:id/flag', () => {
+  it('should flag a wiki entry successfully', async () => {
+    const entry = insertKnowledge({ type: 'wiki', title: 'Flaggable Page', content: 'some content' });
+
+    const resp = await request('POST', `/api/wiki/${entry.id}/flag`);
+    expect(resp.statusCode).toBe(200);
+
+    const data = resp.json() as { entry: { id: string; status: string } };
+    expect(data.entry.id).toBe(entry.id);
+    expect(data.entry.status).toBe('needs_revalidation');
+  });
+
+  it('should flag with a reason', async () => {
+    const entry = insertKnowledge({ type: 'wiki', title: 'Needs Review', content: 'outdated info' });
+
+    const resp = await request('POST', `/api/wiki/${entry.id}/flag`, {
+      reason: 'Statistics are incorrect',
+    });
+    expect(resp.statusCode).toBe(200);
+
+    const data = resp.json() as { entry: { id: string; status: string; flag_reason: string } };
+    expect(data.entry.status).toBe('needs_revalidation');
+    expect(data.entry.flag_reason).toBe('Statistics are incorrect');
+  });
+
+  it('should flag without a reason', async () => {
+    const entry = insertKnowledge({ type: 'wiki', title: 'No Reason', content: 'content' });
+
+    const resp = await request('POST', `/api/wiki/${entry.id}/flag`, {});
+    expect(resp.statusCode).toBe(200);
+
+    const updated = getKnowledgeById(entry.id)!;
+    expect(updated.status).toBe('needs_revalidation');
+    expect(updated.flag_reason).toBeNull();
+  });
+
+  it('should return 404 for nonexistent entry', async () => {
+    const resp = await request('POST', '/api/wiki/nonexistent-id/flag');
+    expect(resp.statusCode).toBe(404);
+  });
+
+  it('should return 400 for non-wiki entry', async () => {
+    const entry = insertKnowledge({ type: 'fact', title: 'A Fact', content: 'factual' });
+
+    const resp = await request('POST', `/api/wiki/${entry.id}/flag`);
+    expect(resp.statusCode).toBe(400);
+  });
+});

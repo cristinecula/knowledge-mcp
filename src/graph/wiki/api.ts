@@ -11,6 +11,7 @@ export interface WikiEntry {
   tags: string[];
   source: string;
   declaration: string | null;
+  flag_reason: string | null;
   parent_page_id: string | null;
   strength: number;
   access_count: number;
@@ -79,6 +80,18 @@ export async function updateWikiEntry(
 export async function deleteWikiEntry(id: string): Promise<{ deleted?: boolean }> {
   const res = await fetch(`/api/wiki/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+  });
+  return await res.json();
+}
+
+export async function flagWikiEntry(
+  id: string,
+  reason?: string,
+): Promise<{ entry?: WikiEntry }> {
+  const res = await fetch(`/api/wiki/${encodeURIComponent(id)}/flag`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
   });
   return await res.json();
 }

@@ -12,6 +12,7 @@ import {
   deleteKnowledge,
   insertLink,
   updateStatus,
+  flagForRevalidation,
 } from '../db/queries.js';
 import { getEmbeddingProvider } from '../embeddings/provider.js';
 import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
@@ -406,6 +407,38 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
       sendError(
         res,
         `Error updating wiki entry: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
+  // POST /api/wiki/:id/flag — flag a wiki entry as inaccurate
+  const wikiFlagMatch = pathname.match(/^\/api\/wiki\/([^/]+)\/flag$/);
+  if (wikiFlagMatch && req.method === 'POST') {
+    const id = decodeURIComponent(wikiFlagMatch[1]);
+    const body = await parseJsonBody(req) as Record<string, unknown> | null;
+    const reason = body && typeof body.reason === 'string' && body.reason.trim()
+      ? body.reason.trim()
+      : undefined;
+
+    try {
+      const existing = getKnowledgeById(id);
+      if (!existing) {
+        sendError(res, `Wiki entry not found: ${id}`);
+        return;
+      }
+      if (existing.type !== 'wiki') {
+        sendError(res, 'Entry is not a wiki page', 400);
+        return;
+      }
+
+      const updated = flagForRevalidation(id, reason);
+      sendJson(res, { entry: updated });
+    } catch (error) {
+      sendError(
+        res,
+        `Error flagging wiki entry: ${error instanceof Error ? error.message : String(error)}`,
         500,
       );
     }

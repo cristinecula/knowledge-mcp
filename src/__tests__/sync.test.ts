@@ -19,6 +19,7 @@ import {
   updateSyncedAt,
   deprecateKnowledge,
   deleteLink,
+  flagForRevalidation,
 } from '../db/queries.js';
 import {
   entryToJSON,
@@ -1532,6 +1533,126 @@ describe('sync layer', () => {
 
       const result = detectConflict(localChild, remoteJSON);
       expect(result.action).toBe('remote_wins');
+    });
+  });
+
+  describe('flag_reason serialization', () => {
+    it('should include flag_reason in entryToJSON when set', () => {
+      const entry = insertKnowledge({ type: 'wiki', title: 'Flagged page', content: 'content' });
+      const flagged = flagForRevalidation(entry.id, 'Statistics are outdated');
+
+      const json = entryToJSON(flagged!);
+      expect(json.flag_reason).toBe('Statistics are outdated');
+      expect(json.status).toBe('needs_revalidation');
+    });
+
+    it('should omit flag_reason in entryToJSON when null', () => {
+      const entry = insertKnowledge({ type: 'wiki', title: 'Active page', content: 'current' });
+
+      const json = entryToJSON(entry);
+      expect(json.flag_reason).toBeUndefined();
+    });
+
+    it('should parse flag_reason from entry JSON', () => {
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000089',
+        type: 'wiki',
+        title: 'Parsed flagged entry',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'needs_revalidation',
+        flag_reason: 'Numbers are wrong',
+        created_at: new Date().toISOString(),
+        version: 1,
+      };
+
+      const parsed = parseEntryJSON(raw);
+      expect(parsed.flag_reason).toBe('Numbers are wrong');
+      expect(parsed.status).toBe('needs_revalidation');
+    });
+
+    it('should handle missing flag_reason in parsed JSON', () => {
+      const raw = {
+        id: '00000000-0000-4000-a000-000000000088',
+        type: 'wiki',
+        title: 'No flag entry',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: new Date().toISOString(),
+        version: 1,
+      };
+
+      const parsed = parseEntryJSON(raw);
+      expect(parsed.flag_reason).toBeUndefined();
+    });
+
+    it('should round-trip flag_reason through serialize/deserialize', () => {
+      const entry = insertKnowledge({ type: 'wiki', title: 'Flagged wiki', content: 'We document X' });
+      const flagged = flagForRevalidation(entry.id, 'X was changed, numbers stale');
+
+      const json = entryToJSON(flagged!);
+      const parsed = parseEntryJSON(json);
+
+      expect(parsed.flag_reason).toBe('X was changed, numbers stale');
+      expect(parsed.status).toBe('needs_revalidation');
+    });
+
+    it('should write and read flag_reason through file sync', () => {
+      const entry = insertKnowledge({ type: 'wiki', title: 'Flagged via file', content: 'stuff' });
+      const flagged = flagForRevalidation(entry.id, 'Needs review');
+
+      // Write to file
+      ensureRepoStructure(repoPath);
+      writeEntryFile(repoPath, entryToJSON(flagged!));
+
+      // Read file back
+      const filePath = join(repoPath, 'entries', 'wiki', `${entry.id}.json`);
+      const fileContent = JSON.parse(readFileSync(filePath, 'utf-8'));
+      expect(fileContent.flag_reason).toBe('Needs review');
+      expect(fileContent.status).toBe('needs_revalidation');
+    });
+
+    it('should import flag_reason during pull', async () => {
+      ensureRepoStructure(repoPath);
+      gitCommitAll(repoPath, 'init structure');
+
+      const entryId = '00000000-0000-4000-a000-000000000087';
+      const entryJSON: EntryJSON = {
+        id: entryId,
+        type: 'wiki',
+        title: 'Flagged wiki page',
+        content: 'Content that may be inaccurate',
+        tags: ['review'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'needs_revalidation',
+        flag_reason: 'User reported incorrect data',
+        created_at: '2025-01-01T00:00:00.000Z',
+        version: 1,
+      };
+
+      // Write entry file to repo
+      const entryDir = join(repoPath, 'entries', 'wiki');
+      mkdirSync(entryDir, { recursive: true });
+      writeFileSync(join(entryDir, `${entryId}.json`), JSON.stringify(entryJSON));
+      gitCommitAll(repoPath, 'add flagged entry');
+
+      // Pull
+      const result = await pull(config);
+      expect(result.new_entries).toBe(1);
+
+      const imported = getKnowledgeById(entryId);
+      expect(imported).not.toBeNull();
+      expect(imported!.status).toBe('needs_revalidation');
+      expect(imported!.flag_reason).toBe('User reported incorrect data');
     });
   });
 

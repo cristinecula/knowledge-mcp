@@ -57,6 +57,9 @@ accessed stays strong; unused knowledge naturally fades.
   they are derived from using \`link_knowledge\` (e.g., \`derived\`, \`elaborates\`, or \`related\` link types).
 - The \`update_knowledge\` tool will warn you if a wiki entry has no outgoing links to non-wiki entries.
   Always resolve these warnings before considering the task complete.
+- Entries may have a **flag_reason** — a human-provided note explaining why the page was flagged as
+  inaccurate. When you see \`flag_reason\` in query or list results, use it as guidance for what to fix.
+  The flag is automatically cleared when you \`update_knowledge\` on a \`needs_revalidation\` entry.
 
 ## Understanding entry history
 

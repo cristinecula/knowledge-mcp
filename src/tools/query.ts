@@ -149,6 +149,9 @@ export function registerQueryTool(server: McpServer): void {
           if (entry.deprecation_reason) {
             result.deprecation_reason = entry.deprecation_reason;
           }
+          if (entry.flag_reason) {
+            result.flag_reason = entry.flag_reason;
+          }
           return result;
         });
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, getOutgoingLinks, getLinksForEntry, updateStatus } from '../db/queries.js';
+import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, getOutgoingLinks, getLinksForEntry, updateStatus, updateKnowledgeContent } from '../db/queries.js';
 import { syncWriteEntry, scheduleCommit } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, SCOPES, REVALIDATION_LINK_TYPES } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
@@ -48,6 +48,10 @@ export function registerUpdateTool(server: McpServer): void {
           // Clear needs_revalidation — updating the entry IS the revalidation
           if (oldEntry && oldEntry.status === 'needs_revalidation') {
             updateStatus(id, 'active');
+            // Clear any human flag_reason since the agent has now addressed it
+            if (oldEntry.flag_reason) {
+              updateKnowledgeContent(id, { flag_reason: null });
+            }
           }
 
           syncWriteEntry(updated, oldEntry?.type, oldEntry?.scope, oldEntry?.project);

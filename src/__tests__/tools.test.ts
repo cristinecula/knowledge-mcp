@@ -27,6 +27,8 @@ import {
   deleteKnowledge,
   storeEmbedding,
   getEmbedding,
+  flagForRevalidation,
+  updateKnowledgeContent,
 } from '../db/queries.js';
 import { calculateNetworkStrength } from '../memory/strength.js';
 import { REINFORCE_ACCESS_BOOST, REVALIDATION_LINK_TYPES } from '../types.js';
@@ -838,5 +840,62 @@ describe('list_knowledge pagination', () => {
     const withoutOffset = listKnowledge({ limit: 5, includeWeak: true });
 
     expect(withOffset.map((e) => e.id)).toEqual(withoutOffset.map((e) => e.id));
+  });
+});
+
+describe('flag_reason workflow', () => {
+  it('should clear flag_reason and status when agent updates a flagged entry', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Flagged Wiki Page',
+      content: 'Original content with stale numbers',
+    });
+
+    // Flag the entry
+    const flagged = flagForRevalidation(entry.id, 'Numbers are outdated');
+    expect(flagged!.status).toBe('needs_revalidation');
+    expect(flagged!.flag_reason).toBe('Numbers are outdated');
+
+    // Simulate what update.ts does: update content and clear flag_reason
+    updateKnowledgeFields(entry.id, {
+      content: 'Updated content with fresh numbers',
+    });
+    updateStatus(entry.id, 'active');
+    updateKnowledgeContent(entry.id, { flag_reason: null });
+
+    const updated = getKnowledgeById(entry.id)!;
+    expect(updated.status).toBe('active');
+    expect(updated.flag_reason).toBeNull();
+    expect(updated.content).toBe('Updated content with fresh numbers');
+  });
+
+  it('should show flag_reason in search results when set', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Searchable Flagged Page',
+      content: 'Content about deployment',
+    });
+
+    flagForRevalidation(entry.id, 'Deployment steps changed');
+
+    const results = searchKnowledge({ query: 'deployment', includeWeak: true });
+    const found = results.find((r) => r.id === entry.id);
+    expect(found).toBeDefined();
+    expect(found!.flag_reason).toBe('Deployment steps changed');
+  });
+
+  it('should show flag_reason in list results when set', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Listable Flagged Page',
+      content: 'Content',
+    });
+
+    flagForRevalidation(entry.id, 'Information is incorrect');
+
+    const results = listKnowledge({ includeWeak: true });
+    const found = results.find((r) => r.id === entry.id);
+    expect(found).toBeDefined();
+    expect(found!.flag_reason).toBe('Information is incorrect');
   });
 });

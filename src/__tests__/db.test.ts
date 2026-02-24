@@ -24,6 +24,7 @@ import {
   getAllEmbeddings,
   deleteEmbedding,
   getGraphData,
+  flagForRevalidation,
 } from '../db/queries.js';
 
 beforeEach(() => {
@@ -804,6 +805,70 @@ describe('declaration field', () => {
       declaration: 'A prompt',
     });
     expect(reinserted.declaration).toBe('A prompt');
+  });
+});
+
+describe('flagForRevalidation', () => {
+  it('should set status to needs_revalidation', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Wiki Page',
+      content: 'Some content',
+    });
+
+    const flagged = flagForRevalidation(entry.id);
+    expect(flagged).not.toBeNull();
+    expect(flagged!.status).toBe('needs_revalidation');
+  });
+
+  it('should store flag_reason when provided', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Wiki Page',
+      content: 'Content',
+    });
+
+    const flagged = flagForRevalidation(entry.id, 'Statistics are outdated');
+    expect(flagged!.flag_reason).toBe('Statistics are outdated');
+    expect(flagged!.status).toBe('needs_revalidation');
+  });
+
+  it('should store null flag_reason when no reason provided', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Wiki Page',
+      content: 'Content',
+    });
+
+    const flagged = flagForRevalidation(entry.id);
+    expect(flagged!.flag_reason).toBeNull();
+  });
+
+  it('should return null for nonexistent ID', () => {
+    const result = flagForRevalidation('nonexistent-id');
+    expect(result).toBeNull();
+  });
+
+  it('should increment version', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Wiki Page',
+      content: 'Content',
+    });
+    expect(entry.version).toBe(1);
+
+    const flagged = flagForRevalidation(entry.id, 'Needs review');
+    expect(flagged!.version).toBe(2);
+  });
+
+  it('should have null flag_reason on new entries', () => {
+    const entry = insertKnowledge({
+      type: 'wiki',
+      title: 'Fresh Wiki',
+      content: 'Content',
+    });
+
+    expect(entry.flag_reason).toBeNull();
   });
 });
 
