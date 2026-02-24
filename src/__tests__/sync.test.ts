@@ -1073,6 +1073,31 @@ describe('sync layer', () => {
       expect(updated2!.version).toBe(3);
     });
 
+    it('should NOT increment version when only parentPageId changes', () => {
+      const parent = insertKnowledge({ type: 'wiki', title: 'Parent', content: 'parent page' });
+      const child = insertKnowledge({ type: 'wiki', title: 'Child', content: 'child page' });
+      expect(child.version).toBe(1);
+      const originalContentUpdatedAt = child.content_updated_at;
+
+      const updated = updateKnowledgeFields(child.id, { parentPageId: parent.id });
+      expect(updated!.version).toBe(1); // version unchanged
+      expect(updated!.content_updated_at).toBe(originalContentUpdatedAt); // content_updated_at unchanged
+      expect(updated!.parent_page_id).toBe(parent.id); // parent was set
+      // updated_at is still refreshed (structural change), but we don't assert
+      // inequality because the test can run within the same millisecond.
+    });
+
+    it('should increment version when parentPageId changes alongside a content field', () => {
+      const parent = insertKnowledge({ type: 'wiki', title: 'Parent', content: 'parent page' });
+      const child = insertKnowledge({ type: 'wiki', title: 'Child', content: 'child page' });
+      expect(child.version).toBe(1);
+
+      const updated = updateKnowledgeFields(child.id, { parentPageId: parent.id, title: 'Renamed Child' });
+      expect(updated!.version).toBe(2); // version bumped because title changed
+      expect(updated!.parent_page_id).toBe(parent.id);
+      expect(updated!.title).toBe('Renamed Child');
+    });
+
     it('should increment version on deprecateKnowledge', () => {
       const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
       const deprecated = deprecateKnowledge(entry.id, 'outdated');

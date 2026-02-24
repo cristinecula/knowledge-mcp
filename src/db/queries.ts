@@ -87,8 +87,26 @@ export function updateKnowledgeFields(
   const db = getDb();
   const now = new Date().toISOString();
 
-  const sets: string[] = ['updated_at = ?', 'content_updated_at = ?', 'version = version + 1'];
-  const values: unknown[] = [now, now];
+  // Check if any content field (not just parentPageId) is being updated.
+  // Changing only the parent is a structural/organizational move and should
+  // not bump version or content_updated_at (which would trigger revalidation
+  // signals through sync).
+  const hasContentChange =
+    fields.title !== undefined ||
+    fields.content !== undefined ||
+    fields.tags !== undefined ||
+    fields.type !== undefined ||
+    fields.project !== undefined ||
+    fields.scope !== undefined ||
+    fields.declaration !== undefined;
+
+  const sets: string[] = ['updated_at = ?'];
+  const values: unknown[] = [now];
+
+  if (hasContentChange) {
+    sets.push('content_updated_at = ?', 'version = version + 1');
+    values.push(now);
+  }
 
   if (fields.title !== undefined) {
     sets.push('title = ?');
