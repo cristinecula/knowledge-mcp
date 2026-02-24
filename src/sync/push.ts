@@ -19,6 +19,7 @@ import {
   writeEntryFile,
   readEntryFileRaw,
   writeLinkFile,
+  readLinkFileRaw,
   deleteEntryFile,
   deleteLinkFile,
   getRepoEntryIds,
@@ -150,17 +151,25 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
       
       if (sourceRepo) {
         const json = linkToJSON(link);
-        writeLinkFile(sourceRepo, json);
-        linkRepoMap.set(link.id, sourceRepo);
-        touchedRepos.add(sourceRepo);
+        const serialized = JSON.stringify(json, null, 2) + '\n';
+        const existing = readLinkFileRaw(sourceRepo, link.id);
 
-        // Count as new if never synced before
-        if (!link.synced_at) {
-          result.new_links++;
+        if (existing === serialized) {
+          // File is byte-identical — skip write
+          updateLinkSyncedAt(link.id);
+        } else {
+          writeLinkFile(sourceRepo, json);
+          linkRepoMap.set(link.id, sourceRepo);
+          touchedRepos.add(sourceRepo);
+
+          // Count as new or updated
+          if (existing === null) {
+            result.new_links++;
+          }
+
+          // Mark link as synced
+          updateLinkSyncedAt(link.id);
         }
-
-        // Mark link as synced
-        updateLinkSyncedAt(link.id);
       }
     }
   });

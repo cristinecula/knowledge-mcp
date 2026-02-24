@@ -89,6 +89,13 @@ export function readEntryFileRaw(repoPath: string, type: KnowledgeType, id: stri
   return readFileSync(filePath, 'utf-8');
 }
 
+/** Read a link JSON file and return its raw string content (for comparison). Returns null if the file doesn't exist. */
+export function readLinkFileRaw(repoPath: string, id: string): string | null {
+  const filePath = linkFilePath(repoPath, id);
+  if (!existsSync(filePath)) return null;
+  return readFileSync(filePath, 'utf-8');
+}
+
 /** Write a link JSON file. */
 export function writeLinkFile(repoPath: string, link: LinkJSON): void {
   const filePath = linkFilePath(repoPath, link.id);
