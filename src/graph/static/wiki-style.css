@@ -355,6 +355,66 @@ body {
   padding: 0 2px;
 }
 
+/* ================================================================
+   Sidebar — Knowledge Base section
+   ================================================================ */
+.wiki-sidebar-kb-section-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wiki-sidebar-kb-section-header:hover {
+  background: var(--wiki-sidebar-hover);
+}
+
+.wiki-sidebar-kb-section {
+  padding: 0 0 4px;
+}
+
+.wiki-sidebar-kb-group {
+  margin: 0;
+}
+
+.wiki-sidebar-kb-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px 2px 24px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wiki-sidebar-kb-group-header:hover {
+  background: var(--wiki-sidebar-hover);
+}
+
+.wiki-sidebar-kb-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wiki-text-muted);
+}
+
+.wiki-sidebar-kb-badge {
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--wiki-badge-bg);
+  color: var(--wiki-badge-text);
+  padding: 0 6px;
+  border-radius: 10px;
+  line-height: 18px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* KB entry links in sidebar — slightly muted compared to wiki links */
+.wiki-sidebar-link-kb {
+  font-style: italic;
+}
+
 /* Mobile sidebar overlay */
 .wiki-sidebar-overlay {
   display: none;
@@ -1035,6 +1095,11 @@ body {
   border-bottom-color: var(--wiki-link-hover);
 }
 
+/* KB entry wikilink — dashed underline to distinguish from wiki page links */
+.wiki-link.wiki-link-kb {
+  border-bottom-style: dashed;
+}
+
 .wiki-link-broken {
   color: var(--wiki-broken-link);
   border-bottom: 1px dashed color-mix(in srgb, var(--wiki-broken-link), transparent 60%);
@@ -1065,6 +1130,105 @@ body {
 
 .wiki-link-entry .wiki-link-type {
   color: var(--wiki-accent-secondary);
+}
+
+/* Clickable entry links in the knowledge links section */
+.wiki-link-entry-link {
+  color: var(--wiki-link);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.wiki-link-entry-link:hover {
+  text-decoration: underline;
+  color: var(--wiki-link-hover);
+}
+
+/* Link description text (shown after the linked entry title) */
+.wiki-link-description {
+  color: var(--wiki-text-muted);
+  font-size: 11px;
+  font-style: italic;
+  margin-left: 6px;
+}
+
+.wiki-link-description::before {
+  content: "\2014 ";
+}
+
+/* ================================================================
+   Type badges (for non-wiki KB entries)
+   ================================================================ */
+
+/* Base type badge — appears next to title in detail view */
+.wiki-type-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-right: 8px;
+  position: relative;
+  top: -2px;
+}
+
+/* Inline type badge — smaller, used in knowledge links list */
+.wiki-type-badge-inline {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+
+/* Type-specific badge colors */
+.wiki-type-badge-convention,
+.wiki-type-badge-inline.wiki-type-badge-convention {
+  background: rgba(9, 105, 218, 0.12);
+  color: var(--wiki-link);
+}
+
+.wiki-type-badge-decision,
+.wiki-type-badge-inline.wiki-type-badge-decision {
+  background: rgba(130, 80, 223, 0.12);
+  color: var(--wiki-accent-secondary);
+}
+
+.wiki-type-badge-pattern,
+.wiki-type-badge-inline.wiki-type-badge-pattern {
+  background: rgba(26, 127, 55, 0.12);
+  color: var(--wiki-success);
+}
+
+.wiki-type-badge-pitfall,
+.wiki-type-badge-inline.wiki-type-badge-pitfall {
+  background: rgba(207, 34, 46, 0.12);
+  color: var(--wiki-danger);
+}
+
+.wiki-type-badge-fact,
+.wiki-type-badge-inline.wiki-type-badge-fact {
+  background: rgba(154, 103, 0, 0.12);
+  color: var(--wiki-warning);
+}
+
+.wiki-type-badge-debug_note,
+.wiki-type-badge-inline.wiki-type-badge-debug_note {
+  background: rgba(9, 105, 218, 0.08);
+  color: var(--wiki-text-secondary);
+}
+
+.wiki-type-badge-process,
+.wiki-type-badge-inline.wiki-type-badge-process {
+  background: rgba(130, 80, 223, 0.08);
+  color: var(--wiki-text-secondary);
 }
 
 /* ================================================================

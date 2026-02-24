@@ -237,6 +237,28 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     return;
   }
 
+  // --- KB entries API route (non-wiki knowledge entries) ---
+
+  // GET /api/kb-entries — list all non-wiki knowledge entries
+  if (pathname === '/api/kb-entries' && req.method === 'GET') {
+    try {
+      const allEntries = searchKnowledge({
+        limit: 250,
+        status: 'all',
+        sortBy: 'recent',
+      });
+      const entries = allEntries.filter((e) => e.type !== 'wiki');
+      sendJson(res, { entries });
+    } catch (error) {
+      sendError(
+        res,
+        `Error listing KB entries: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
   // --- Wiki API routes ---
 
   // GET /api/wiki — list all wiki entries

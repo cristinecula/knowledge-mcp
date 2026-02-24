@@ -1,4 +1,4 @@
-// <wiki-detail> — shows a single wiki page with content rendered as markdown
+// <wiki-detail> — shows a single wiki page or KB entry with content rendered as markdown
 
 import { component, html, useState, useEffect } from '@pionjs/pion';
 import { navigate } from '@neovici/cosmoz-router';
@@ -6,6 +6,7 @@ import { marked } from 'marked';
 import {
   fetchEntry,
   fetchWikiEntries,
+  fetchKbEntries,
   deleteWikiEntry,
   flagWikiEntry,
   type WikiEntry,
@@ -14,6 +15,18 @@ import {
 import { escapeHtml, timeAgo, statusBadge, slugify } from '../util.js';
 import { resolveWikiLinks } from '../wikilinks.js';
 import { extractToc, renderTocHtml } from '../toc.js';
+
+/** Display labels for entry types. */
+const TYPE_LABELS: Record<string, string> = {
+  wiki: 'wiki',
+  convention: 'convention',
+  decision: 'decision',
+  pattern: 'pattern',
+  pitfall: 'pitfall',
+  fact: 'fact',
+  debug_note: 'debug note',
+  process: 'process',
+};
 
 /** Build breadcrumb chain from current entry up to root. */
 function buildBreadcrumbs(entry: WikiEntry, allEntries: WikiEntry[]): WikiEntry[] {
@@ -36,6 +49,7 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
   const entryId = this.entryId;
   const [entry, setEntry] = useState<WikiEntry | null>(null);
   const [allEntries, setAllEntries] = useState<WikiEntry[]>([]);
+  const [kbEntries, setKbEntries] = useState<WikiEntry[]>([]);
   const [links, setLinks] = useState<WikiLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -45,15 +59,16 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
     let cancelled = false;
     setLoading(true);
     setNotFound(false);
-    Promise.all([fetchEntry(entryId), fetchWikiEntries()]).then(
-      ([data, entries]) => {
+    Promise.all([fetchEntry(entryId), fetchWikiEntries(), fetchKbEntries()]).then(
+      ([data, wikiEntries, kb]) => {
         if (cancelled) return;
         if (!data || !data.entry) {
           setNotFound(true);
         } else {
           setEntry(data.entry);
           setLinks(data.links || []);
-          setAllEntries(entries);
+          setAllEntries(wikiEntries);
+          setKbEntries(kb);
         }
         setLoading(false);
       },
@@ -71,12 +86,14 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
     return html`<div class="wiki-empty">Entry not found</div>`;
   }
 
+  const isWiki = entry.type === 'wiki';
+
   // Render content: resolve wiki links -> markdown -> extract TOC
   let contentHtml = '';
   let tocHtml = '';
 
   if (entry.content && entry.content.trim()) {
-    const withLinks = resolveWikiLinks(entry.content, allEntries);
+    const withLinks = resolveWikiLinks(entry.content, allEntries, kbEntries);
     const rawHtml = marked.parse(withLinks) as string;
     const { toc, html: htmlWithIds } = extractToc(rawHtml);
     contentHtml = htmlWithIds;
@@ -85,15 +102,21 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
       tocHtml = renderTocHtml(toc);
     }
   } else {
-    contentHtml =
-      '<div class="wiki-content-empty">No content yet. An agent will fill this in based on the declaration.</div>';
+    contentHtml = isWiki
+      ? '<div class="wiki-content-empty">No content yet. An agent will fill this in based on the declaration.</div>'
+      : '<div class="wiki-content-empty">No content yet.</div>';
   }
 
-  // Build breadcrumbs (ancestors)
-  const breadcrumbs = buildBreadcrumbs(entry, allEntries);
+  // Build breadcrumbs (ancestors) — only for wiki entries
+  const breadcrumbs = isWiki ? buildBreadcrumbs(entry, allEntries) : [];
 
-  // Find child pages
-  const children = allEntries.filter((e) => e.parent_page_id === entry.id);
+  // Find child pages — only for wiki entries
+  const children = isWiki ? allEntries.filter((e) => e.parent_page_id === entry.id) : [];
+
+  // Build a lookup map for linked entry titles (both wiki + KB)
+  const allKnownEntries = new Map<string, WikiEntry>();
+  for (const e of allEntries) allKnownEntries.set(e.id, e);
+  for (const e of kbEntries) allKnownEntries.set(e.id, e);
 
   const handleDelete = async () => {
     if (confirm(`Delete wiki page "${entry.title}"?`)) {
@@ -114,10 +137,12 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
     }
   };
 
+  const typeLabel = TYPE_LABELS[entry.type] || entry.type;
+
   return html`
     <div class="wiki-detail">
-      <!-- Breadcrumbs -->
-      ${breadcrumbs.length > 0
+      <!-- Breadcrumbs — wiki entries only -->
+      ${isWiki && breadcrumbs.length > 0
         ? html`<nav class="wiki-breadcrumbs">
             <a
               class="wiki-breadcrumb-link"
@@ -154,29 +179,36 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
       <!-- Page header -->
       <div class="wiki-detail-header">
         <div style="flex:1;min-width:0">
-          <h1 class="wiki-detail-title">${entry.title}</h1>
+          <h1 class="wiki-detail-title">
+            ${!isWiki
+              ? html`<span class="wiki-type-badge wiki-type-badge-${entry.type}">${typeLabel}</span>`
+              : null}
+            ${entry.title}
+          </h1>
         </div>
-        <div class="wiki-detail-actions">
-          <button
-            class="wiki-btn wiki-btn-sm"
-            @click=${() =>
-              navigate(`/wiki/${entry.id}/edit`, null, { replace: false })}
-          >
-            Edit
-          </button>
-          <button
-            class="wiki-btn wiki-btn-sm wiki-btn-warning"
-            @click=${handleFlag}
-          >
-            Flag
-          </button>
-          <button
-            class="wiki-btn wiki-btn-sm wiki-btn-danger"
-            @click=${handleDelete}
-          >
-            Delete
-          </button>
-        </div>
+        ${isWiki
+          ? html`<div class="wiki-detail-actions">
+              <button
+                class="wiki-btn wiki-btn-sm"
+                @click=${() =>
+                  navigate(`/wiki/${entry.id}/edit`, null, { replace: false })}
+              >
+                Edit
+              </button>
+              <button
+                class="wiki-btn wiki-btn-sm wiki-btn-warning"
+                @click=${handleFlag}
+              >
+                Flag
+              </button>
+              <button
+                class="wiki-btn wiki-btn-sm wiki-btn-danger"
+                @click=${handleDelete}
+              >
+                Delete
+              </button>
+            </div>`
+          : null}
       </div>
 
       <!-- Meta line -->
@@ -191,8 +223,8 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
         `}
       ></div>
 
-      <!-- Flag warning banner -->
-      ${entry.flag_reason != null
+      <!-- Flag warning banner — wiki entries only -->
+      ${isWiki && entry.flag_reason != null
         ? html`<div class="wiki-flag-banner">
             <strong>Flagged as inaccurate</strong>${entry.flag_reason
               ? html`: ${entry.flag_reason}`
@@ -209,8 +241,8 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
           </div>`
         : null}
 
-      <!-- Declaration -->
-      ${entry.declaration
+      <!-- Declaration — wiki entries only -->
+      ${isWiki && entry.declaration
         ? html`<div class="wiki-declaration">
             <div class="wiki-declaration-label">Declaration</div>
             ${entry.declaration}
@@ -249,7 +281,7 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
         }}
       ></div>
 
-      <!-- Knowledge graph links -->
+      <!-- Knowledge graph links — clickable with descriptions -->
       ${links.length > 0
         ? html`<div class="wiki-links-section">
             <h4>Knowledge Links (${links.length})</h4>
@@ -257,17 +289,42 @@ function WikiDetail(this: HTMLElement & { entryId: string }) {
               const isOutgoing = link.source_id === entry.id;
               const otherId = isOutgoing ? link.target_id : link.source_id;
               const direction = isOutgoing ? '\u2192' : '\u2190';
+              const linkedEntry = allKnownEntries.get(otherId);
+              const linkedTitle = linkedEntry
+                ? linkedEntry.title
+                : `${otherId.slice(0, 8)}...`;
+              const linkedType = linkedEntry?.type;
+
               return html`<div class="wiki-link-entry">
                 <span class="wiki-link-type">${link.link_type}</span>
                 ${direction}
-                <code>${otherId.slice(0, 8)}...</code>
+                ${linkedEntry
+                  ? html`<a
+                      class="wiki-link-entry-link"
+                      href="/wiki/${otherId}/${slugify(linkedTitle)}"
+                      @click=${(e: Event) => {
+                        e.preventDefault();
+                        navigate(
+                          `/wiki/${otherId}/${slugify(linkedTitle)}`,
+                          null,
+                          { replace: false },
+                        );
+                      }}
+                    >${linkedType && linkedType !== 'wiki'
+                        ? html`<span class="wiki-type-badge-inline wiki-type-badge-${linkedType}">${TYPE_LABELS[linkedType] || linkedType}</span> `
+                        : null}${linkedTitle}</a
+                  >`
+                  : html`<code>${linkedTitle}</code>`}
+                ${link.description
+                  ? html`<span class="wiki-link-description">${link.description}</span>`
+                  : null}
               </div>`;
             })}
           </div>`
         : null}
 
-      <!-- Child pages -->
-      ${children.length > 0
+      <!-- Child pages — wiki entries only -->
+      ${isWiki && children.length > 0
         ? html`<div class="wiki-children">
             <h4 class="wiki-children-heading">
               Child Pages (${children.length})
