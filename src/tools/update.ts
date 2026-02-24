@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, getOutgoingLinks, updateStatus } from '../db/queries.js';
+import { updateKnowledgeFields, getKnowledgeById, getIncomingLinks, getOutgoingLinks, getLinksForEntry, updateStatus } from '../db/queries.js';
 import { syncWriteEntry, scheduleCommit } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, SCOPES, REVALIDATION_LINK_TYPES } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
@@ -98,6 +98,28 @@ export function registerUpdateTool(server: McpServer): void {
                 'Wiki pages should reference the knowledge entries they are derived from. ' +
                 'Use link_knowledge to create links (e.g., "derived", "elaborates", or "related") ' +
                 'from this wiki entry to the relevant source entries.';
+            }
+          }
+
+          // Warn if this entry has unresolved sync conflicts
+          const entryLinks = getLinksForEntry(id);
+          const conflictLinks = entryLinks.filter((l) => l.link_type === 'conflicts_with');
+          if (conflictLinks.length > 0) {
+            for (const cl of conflictLinks) {
+              const isConflictCopy = cl.source_id === id;
+              if (isConflictCopy) {
+                responseText +=
+                  `\n\n⚠ SYNC CONFLICT: This entry is a sync conflict copy. ` +
+                  `The canonical version is ${cl.target_id}. ` +
+                  `If you are resolving the conflict, update the canonical entry instead, ` +
+                  `then delete this conflict copy with delete_knowledge and remove the conflicts_with link.`;
+              } else {
+                responseText +=
+                  `\n\n⚠ SYNC CONFLICT: This entry has an unresolved sync conflict. ` +
+                  `A conflict copy with local changes exists at ${cl.source_id}. ` +
+                  `If the local changes in the conflict copy should be preserved, merge them into this entry. ` +
+                  `Then delete the conflict copy with delete_knowledge and remove the conflicts_with link.`;
+              }
             }
           }
 

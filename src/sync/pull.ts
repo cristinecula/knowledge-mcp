@@ -2,12 +2,16 @@
  * Pull: import remote changes from the sync repo into the local SQLite database.
  *
  * For each remote entry:
- * - New → insert into local DB
- * - Existing, no conflict → apply remote changes or skip
- * - Existing, true conflict → keep both, create [Sync Conflict] entry
+ * - New -> insert into local DB with synced_version = remote.version
+ * - Existing, no conflict -> apply remote changes or skip, update synced_version
+ * - Existing, true conflict -> remote wins as canonical, local saved as [Sync Conflict]
  *
  * For entries deleted remotely (in local DB with synced_at but not in repo):
  * - Delete from local DB
+ *
+ * Conflict resolution is "remote wins": the remote version overwrites the local
+ * entry (stays active), and the local content is preserved as a new [Sync Conflict]
+ * entry with a 'conflicts_with' link for the agent to resolve.
  */
 
 import { existsSync } from 'node:fs';
@@ -20,6 +24,7 @@ import {
   updateKnowledgeContent,
   updateSyncedAt,
   alignContentTimestamp,
+  updateSyncedVersion,
   updateStatus,
   deleteKnowledge,
   deleteLink,
@@ -77,7 +82,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
   for (const repo of config.repos) {
     if (!existsSync(repo.path)) continue;
 
-    // Pull remote changes (async — doesn't block the event loop)
+    // Pull remote changes (async -- doesn't block the event loop)
     await gitPull(repo.path);
 
     ensureRepoStructure(repo.path);
@@ -107,7 +112,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
     const local = getKnowledgeById(remote.id);
 
     if (!local) {
-      // New entry from remote — import it
+      // New entry from remote -- import it with synced_version = remote.version
       try {
         importKnowledge({
           id: remote.id,
@@ -124,6 +129,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           parent_page_id: remote.parent_page_id ?? null,
           created_at: remote.created_at,
           updated_at: remote.updated_at,
+          version: remote.version,
         });
         result.new_entries++;
 
@@ -139,19 +145,17 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
       continue;
     }
 
-    // Entry exists locally — check for conflicts
+    // Entry exists locally -- check for conflicts
     const mergeResult = detectConflict(local, remote);
 
     switch (mergeResult.action) {
       case 'no_change':
-        // If the remote's updated_at differs from our content_updated_at,
-        // align ours to match. This prevents push from serializing a
-        // different updated_at and creating a spurious commit. Common when
-        // an older version sets content_updated_at = now() on every pull.
+        // Align content_updated_at if needed, and update synced_version
         if (remote.updated_at !== local.content_updated_at) {
-          alignContentTimestamp(local.id, remote.updated_at);
+          alignContentTimestamp(local.id, remote.updated_at, remote.version);
         } else {
-          updateSyncedAt(local.id);
+          // Just update synced_version to reflect we're in sync
+          updateSyncedVersion(local.id, remote.version);
         }
         break;
 
@@ -159,7 +163,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
         // Apply remote changes to local (keep local memory fields)
         // Pass remote.updated_at as content_updated_at override to prevent
         // timestamp drift: the JSON updated_at roundtrips cleanly through
-        // push → pull cycles without generating spurious commits.
+        // push -> pull cycles without generating spurious commits.
         updateKnowledgeContent(local.id, {
           type: remote.type as KnowledgeType,
           title: remote.title,
@@ -173,6 +177,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           deprecation_reason: remote.deprecation_reason ?? null,
           declaration: remote.declaration ?? null,
           parent_page_id: remote.parent_page_id ?? null,
+          version: remote.version,
         }, remote.updated_at);
         result.updated++;
 
@@ -185,47 +190,61 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
         break;
 
       case 'local_wins':
-        // Keep local content, just update synced_at
-        updateSyncedAt(local.id);
+        // Keep local content, update synced_version to remote.version
+        // This marks us as "aware" of the remote state but keeping local changes
+        updateSyncedVersion(local.id, remote.version);
         break;
 
       case 'conflict': {
-        // Keep both versions:
-        // 1. Local stays as-is but flagged needs_revalidation
-        // 2. Create a new conflict entry with remote content + contradicts link
-        // 3. Flag both as needs_revalidation
+        // Flipped conflict resolution: REMOTE wins as canonical, LOCAL saved as conflict copy.
+        //
+        // 1. Save LOCAL content as [Sync Conflict] entry with needs_revalidation
+        // 2. Accept REMOTE as canonical -- overwrite local entry, stays active
+        // 3. Create conflicts_with link (conflict copy -> canonical, source: 'sync:conflict')
+        // 4. No needs_revalidation on the canonical entry
 
-        // Flag local entry
-        if (local.status !== 'deprecated' && local.status !== 'dormant') {
-          updateStatus(local.id, 'needs_revalidation');
-        }
-        updateSyncedAt(local.id);
-
-        // Create conflict entry with remote content
+        // Step 1: Save local content as conflict entry
         const conflictEntry = insertKnowledge({
+          type: local.type,
+          title: `[Sync Conflict] ${local.title}`,
+          content: local.content,
+          tags: local.tags,
+          project: local.project,
+          scope: local.scope,
+          source: 'sync:conflict',
+        });
+
+        // Mark conflict copy as needs_revalidation so agents know to resolve it
+        updateStatus(conflictEntry.id, 'needs_revalidation');
+
+        // Step 2: Accept remote as canonical -- overwrite local entry
+        updateKnowledgeContent(local.id, {
           type: remote.type as KnowledgeType,
-          title: `[Sync Conflict] ${remote.title}`,
+          title: remote.title,
           content: remote.content,
           tags: remote.tags,
           project: remote.project,
           scope: remote.scope as Scope,
-          source: 'sync:conflict',
-        });
+          source: remote.source,
+          status: remote.status as Status,
+          updated_at: remote.updated_at,
+          deprecation_reason: remote.deprecation_reason ?? null,
+          declaration: remote.declaration ?? null,
+          parent_page_id: remote.parent_page_id ?? null,
+          version: remote.version,
+        }, remote.updated_at);
 
-        // Flag conflict entry too
-        updateStatus(conflictEntry.id, 'needs_revalidation');
-
-        // Create contradicts link from conflict → original
+        // Step 3: Create conflicts_with link from conflict copy -> canonical
         try {
           insertLink({
             sourceId: conflictEntry.id,
             targetId: local.id,
-            linkType: 'contradicts',
-            description: 'Sync conflict: both local and remote modified since last sync',
+            linkType: 'conflicts_with',
+            description: 'Sync conflict: both local and remote modified since last sync. This entry contains the local version; the linked entry has the remote (canonical) version.',
             source: 'sync:conflict',
           });
         } catch {
-          // Link creation can fail if a contradicts link already exists
+          // Link creation can fail if a link already exists
         }
 
         result.conflicts++;
@@ -233,8 +252,15 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           original_id: local.id,
           conflict_id: conflictEntry.id,
           title: remote.title,
-          reason: 'Both local and remote modified since last sync',
+          reason: 'Both local and remote modified since last sync. Remote accepted as canonical; local saved as conflict copy.',
         });
+
+        // Re-generate embedding for the canonical entry
+        try {
+          await embedAndStore(local.id, remote.title, remote.content, remote.tags);
+        } catch {
+          // Non-fatal
+        }
         break;
       }
     }
@@ -245,7 +271,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
 
   for (const local of localEntries) {
     if (local.synced_at && !repoEntryIds.has(local.id)) {
-      // Skip conflict entries — they're local-only resolution artifacts
+      // Skip conflict entries -- they're local-only resolution artifacts
       if (local.title.startsWith('[Sync Conflict]')) continue;
 
       deleteKnowledge(local.id);
@@ -284,7 +310,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
 
   // 5. Detect remote link deletions
   // Only delete links that have been synced before (synced_at is set).
-  // Links created locally (synced_at IS NULL) are preserved — they haven't
+  // Links created locally (synced_at IS NULL) are preserved -- they haven't
   // been pushed yet, so their absence from the repo doesn't mean they were
   // deleted remotely.
   const localLinks = getAllLinks();

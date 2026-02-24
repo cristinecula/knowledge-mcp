@@ -39,6 +39,7 @@ export const LINK_TYPES = [
   'contradicts',
   'supersedes',
   'elaborates',
+  'conflicts_with',
 ] as const;
 
 export type LinkType = (typeof LINK_TYPES)[number];
@@ -65,6 +66,8 @@ export interface KnowledgeEntry {
   deprecation_reason: string | null;
   declaration: string | null;
   parent_page_id: string | null;
+  version: number;
+  synced_version: number | null;
 }
 
 /** Row shape as stored in SQLite (tags is a JSON string) */
@@ -88,6 +91,8 @@ export interface KnowledgeRow {
   deprecation_reason: string | null;
   declaration: string | null;
   parent_page_id: string | null;
+  version: number;
+  synced_version: number | null;
 }
 export interface KnowledgeLink {
   id: string;
@@ -131,6 +136,7 @@ export const LINK_WEIGHTS: Record<LinkType, number> = {
   contradicts: 0.15,
   supersedes: 0.15,
   related: 0.1,
+  conflicts_with: 0,
 };
 
 /** Maximum network bonus as a fraction of base strength */

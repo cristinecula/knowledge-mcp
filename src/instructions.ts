@@ -61,4 +61,25 @@ When git sync is configured, you can inspect how entries evolved over time:
 - Use \`get_entry_history\` to see the commit log for an entry — who changed it, when, and how many times.
 - Use \`get_entry_at_version\` with a commit hash to retrieve the full content of an entry at a specific point in time.
 - This is useful when resolving conflicts, understanding why a decision was changed, or reviewing team activity.
+
+## Resolving sync conflicts
+
+When \`sync_knowledge\` detects that both local and remote modified the same entry,
+it creates a **sync conflict**:
+
+- The **remote version wins** and becomes the canonical entry (stays active).
+- The **local version** is saved as a new \`[Sync Conflict]\` entry linked via a
+  \`conflicts_with\` link to the canonical entry.
+
+When \`query_knowledge\` or \`list_knowledge\` returns entries involved in a sync conflict,
+the response includes a \`warnings\` array with resolution instructions.
+
+**To resolve a conflict:**
+1. Read both the canonical entry and the conflict copy (the \`conflicts_with\` link tells you which is which).
+2. Decide which content is correct, or merge the best parts of both.
+3. Use \`update_knowledge\` on the canonical entry with the final content.
+4. Use \`delete_knowledge\` to remove the \`[Sync Conflict]\` copy.
+5. The \`conflicts_with\` link is automatically removed when the conflict copy is deleted.
+
+Do not leave conflicts unresolved — they indicate divergent knowledge that needs human or agent judgment.
 `.trim();

@@ -214,13 +214,21 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
           }>;
           expect(conflictDetails).toHaveLength(1);
           expect(conflictDetails[0].original_id).toBe(entry.id);
+          // Remote wins: the canonical entry title is Alice's version
           expect(conflictDetails[0].title).toBe('Alice version');
 
-          // Agent B should have a [Sync Conflict] entry
+          // Agent B should have a [Sync Conflict] entry with Bob's LOCAL content
           const results = await queryEntries(agentB, 'Sync Conflict');
           const conflict = results.results.find((r) => r.title.includes('[Sync Conflict]'));
           expect(conflict).toBeTruthy();
-          expect(conflict!.title).toContain('Alice version');
+          // Flipped: conflict copy has Bob's local version (not Alice's remote)
+          expect(conflict!.title).toContain('Bob version');
+
+          // The canonical entry should now have Alice's content (remote wins)
+          const canonical = await queryEntries(agentB, 'Alice version');
+          const found = canonical.results.find((r) => r.id === entry.id);
+          expect(found).toBeTruthy();
+          expect(found!.title).toBe('Alice version');
         } finally {
           await destroyAgent(agentB);
         }
@@ -230,7 +238,7 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
       }
     });
 
-    it('should mark conflict entries with needs_revalidation and contradicts link', async () => {
+    it('should mark conflict copy as active with conflicts_with link', async () => {
       const remote = createBareRemote();
       const agentA = await spawnAgent(remote, 'alice');
       try {
@@ -256,31 +264,31 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
           }>;
           expect(conflictDetails).toHaveLength(1);
 
-          // Query using query_knowledge (which includes links in results) to verify
-          // the original entry is flagged as needs_revalidation
+          // The canonical entry (remote wins) should be active — NOT needs_revalidation
           const origResults = await queryEntries(agentB, 'Contested');
           const original = origResults.results.find((r) => r.id === entry.id);
           expect(original).toBeTruthy();
-          expect(original!.status).toBe('needs_revalidation');
+          expect(original!.content).toBe('Alice v2'); // remote content wins
+          expect(original!.status).toBe('active');
 
-          // Query the conflict entry — should have a contradicts link to the original
+          // The conflict copy should have Bob's local content
           const conflictResults = await queryEntries(agentB, 'Sync Conflict');
           const conflictEntry = conflictResults.results.find(
             (r) => r.id === conflictDetails[0].conflict_id,
           );
           expect(conflictEntry).toBeTruthy();
-          expect(conflictEntry!.status).toBe('needs_revalidation');
+          expect(conflictEntry!.content).toBe('Bob v2'); // local content preserved
 
-          // Check that the contradicts link exists
+          // Check that the conflicts_with link exists (not contradicts)
           const links = conflictEntry!.links as Array<{
             link_type: string;
             linked_entry_id: string;
             direction: string;
           }>;
-          const contradictsLink = links.find(
-            (l) => l.link_type === 'contradicts' && l.linked_entry_id === entry.id,
+          const conflictsWithLink = links.find(
+            (l) => l.link_type === 'conflicts_with' && l.linked_entry_id === entry.id,
           );
-          expect(contradictsLink).toBeTruthy();
+          expect(conflictsWithLink).toBeTruthy();
         } finally {
           await destroyAgent(agentB);
         }
@@ -346,24 +354,24 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
           expect(conflictDetails).toHaveLength(1);
           expect(conflictDetails[0].original_id).toBe(entry.id);
 
-          // The original entry on Bob's side should still have Bob's content
-          const origResults = await queryEntries(agentB, 'Bob improved');
+          // The canonical entry on Bob's side should now have Alice's content (remote wins)
+          const origResults = await queryEntries(agentB, 'Alice refactored');
           const original = origResults.results.find((r: Record<string, unknown>) => r.id === entry.id);
           expect(original).toBeTruthy();
-          expect(original!.title).toBe('Bob improved entry');
-          expect(original!.content).toContain('Bob added detailed implementation notes');
+          expect(original!.title).toBe('Alice refactored entry');
+          expect(original!.content).toContain('Alice completely rewrote this');
 
-          // The conflict entry should have Alice's content (remote version)
+          // The conflict entry should have Bob's content (local version)
           const conflictResults = await queryEntries(agentB, 'Sync Conflict');
           const conflict = conflictResults.results.find(
             (r: Record<string, unknown>) => r.id === conflictDetails[0].conflict_id,
           );
           expect(conflict).toBeTruthy();
-          expect(conflict!.title).toContain('Alice refactored entry');
-          expect(conflict!.content).toContain('Alice completely rewrote this');
-          // Conflict entry should preserve Alice's tags
-          expect(conflict!.tags).toContain('alice-tag');
-          expect(conflict!.tags).toContain('refactored');
+          expect(conflict!.title).toContain('Bob improved entry');
+          expect(conflict!.content).toContain('Bob added detailed implementation notes');
+          // Conflict entry should preserve Bob's tags (local version)
+          expect(conflict!.tags).toContain('bob-tag');
+          expect(conflict!.tags).toContain('detailed');
         } finally {
           await destroyAgent(agentB);
         }
@@ -475,7 +483,7 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
         );
         expect(conflictOnRemote).toBe(false);
 
-        // Charlie should see the original entry (Bob's local version was pushed)
+        // Charlie should see the original entry (with Alice's remote content, which Bob accepted as canonical)
         const originalOnCharlie = charlieEntries.find((r) => r.id === entry.id);
         expect(originalOnCharlie).toBeTruthy();
       } finally {
@@ -614,22 +622,21 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
           );
           expect(conflictEntries.length).toBe(2);
 
-          // Each conflict entry should have a contradicts link to its corresponding original
+          // Each conflict entry should have a conflicts_with link to its corresponding canonical
           for (const detail of conflictDetails) {
             const conflictEntry = conflictEntries.find(
               (r: Record<string, unknown>) => r.id === detail.conflict_id,
             );
             expect(conflictEntry).toBeTruthy();
-            expect(conflictEntry!.status).toBe('needs_revalidation');
 
             const links = (conflictEntry!.links ?? []) as Array<{
               link_type: string;
               linked_entry_id: string;
             }>;
-            const contradictsLink = links.find(
-              (l) => l.link_type === 'contradicts' && l.linked_entry_id === detail.original_id,
+            const conflictsWithLink = links.find(
+              (l) => l.link_type === 'conflicts_with' && l.linked_entry_id === detail.original_id,
             );
-            expect(contradictsLink).toBeTruthy();
+            expect(conflictsWithLink).toBeTruthy();
           }
         } finally {
           await destroyAgent(agentB);
@@ -674,7 +681,7 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
           expect(conflictDetails).toHaveLength(1);
           const conflictId = conflictDetails[0].conflict_id;
 
-          // Verify contradicts link exists initially
+          // Verify conflicts_with link exists initially
           let conflictQuery = await queryEntries(agentB, 'Sync Conflict');
           let conflictEntry = conflictQuery.results.find(
             (r: Record<string, unknown>) => r.id === conflictId,
@@ -684,16 +691,16 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
             link_type: string;
             linked_entry_id: string;
           }>;
-          let contradictsLink = links.find(
-            (l) => l.link_type === 'contradicts' && l.linked_entry_id === entry.id,
+          let conflictsWithLink = links.find(
+            (l) => l.link_type === 'conflicts_with' && l.linked_entry_id === entry.id,
           );
-          expect(contradictsLink).toBeTruthy();
+          expect(conflictsWithLink).toBeTruthy();
 
           // Bob pushes (conflict entry + link NOT pushed) then pulls again
           await syncAgent(agentB, 'push');
           await syncAgent(agentB, 'pull');
 
-          // The contradicts link should still exist — not deleted by remote link
+          // The conflicts_with link should still exist — not deleted by remote link
           // deletion logic (links with source 'sync:conflict' are protected)
           conflictQuery = await queryEntries(agentB, 'Sync Conflict');
           conflictEntry = conflictQuery.results.find(
@@ -704,10 +711,10 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
             link_type: string;
             linked_entry_id: string;
           }>;
-          contradictsLink = links.find(
-            (l) => l.link_type === 'contradicts' && l.linked_entry_id === entry.id,
+          conflictsWithLink = links.find(
+            (l) => l.link_type === 'conflicts_with' && l.linked_entry_id === entry.id,
           );
-          expect(contradictsLink).toBeTruthy();
+          expect(conflictsWithLink).toBeTruthy();
         } finally {
           await destroyAgent(agentB);
         }

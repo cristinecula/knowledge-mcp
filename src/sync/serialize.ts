@@ -47,6 +47,7 @@ export interface EntryJSON {
   parent_page_id?: string | null;
   created_at: string;
   updated_at: string;
+  version: number;
 }
 
 /** Shape of a link as stored in a JSON file. */
@@ -77,6 +78,7 @@ export function entryToJSON(entry: KnowledgeEntry): EntryJSON {
     status: entry.status,
     created_at: entry.created_at,
     updated_at: entry.content_updated_at || entry.updated_at,
+    version: entry.version,
   };
 
   // Only include deprecation_reason when it has a value (keep JSON clean)
@@ -175,6 +177,11 @@ export function parseEntryJSON(data: unknown): EntryJSON {
     parent_page_id = obj.parent_page_id;
   }
 
+  // Version must be a positive integer (default to 1 for backward compat with pre-version JSON files)
+  const version = typeof obj.version === 'number' && Number.isInteger(obj.version) && obj.version >= 1
+    ? obj.version
+    : 1;
+
   const result: EntryJSON = {
     id: obj.id,
     type: obj.type as KnowledgeType,
@@ -187,6 +194,7 @@ export function parseEntryJSON(data: unknown): EntryJSON {
     status,
     created_at: obj.created_at,
     updated_at: obj.updated_at,
+    version,
   };
 
   // Only include deprecation_reason when it has a value

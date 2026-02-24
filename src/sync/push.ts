@@ -10,6 +10,7 @@ import {
   getAllEntries,
   getAllLinks,
   updateSyncedAt,
+  updateSyncedVersion,
   updateLinkSyncedAt,
 } from '../db/queries.js';
 import { getDb } from '../db/connection.js';
@@ -88,12 +89,12 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
       const existing = readEntryFileRaw(repoPath, entry.type, entry.id);
 
       if (existing === serialized) {
-        // File is byte-identical — skip write
-        updateSyncedAt(entry.id);
+        // File is byte-identical — skip write, just update synced_version
+        updateSyncedVersion(entry.id, entry.version);
       } else {
-        // File changed or is new — write it
+        // File changed or is new — write it and set synced_version
         writeEntryFile(repoPath, json);
-        updateSyncedAt(entry.id);
+        updateSyncedVersion(entry.id, entry.version);
         touchedRepos.add(repoPath);
 
         // Count as new or updated
@@ -141,8 +142,9 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
   // Batch link processing in a transaction for performance.
   const processLinks = db.transaction(() => {
     for (const link of localLinks) {
-      // Skip conflict-related links
+      // Skip conflict-related links (never synced to repo)
       if (link.source === 'sync:conflict') continue;
+      if (link.link_type === 'conflicts_with') continue;
 
       localLinkIds.add(link.id);
 

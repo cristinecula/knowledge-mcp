@@ -33,8 +33,8 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
   const id = randomUUID();
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, declaration, parent_page_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active', NULL, ?, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, declaration, parent_page_id, version, synced_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, 'active', NULL, ?, ?, 1, NULL)
   `);
 
   stmt.run(
@@ -82,7 +82,7 @@ export function updateKnowledgeFields(
   const db = getDb();
   const now = new Date().toISOString();
 
-  const sets: string[] = ['updated_at = ?', 'content_updated_at = ?'];
+  const sets: string[] = ['updated_at = ?', 'content_updated_at = ?', 'version = version + 1'];
   const values: unknown[] = [now, now];
 
   if (fields.title !== undefined) {
@@ -139,7 +139,7 @@ export function updateStatus(id: string, status: Status): void {
   const db = getDb();
   const now = new Date().toISOString();
   db.prepare(
-    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ? WHERE id = ?',
+    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ?, version = version + 1 WHERE id = ?',
   ).run(status, now, now, id);
 }
 
@@ -152,7 +152,7 @@ export function deprecateKnowledge(id: string, reason?: string): KnowledgeEntry 
   const db = getDb();
   const now = new Date().toISOString();
   const result = db.prepare(
-    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ?, deprecation_reason = ? WHERE id = ?',
+    'UPDATE knowledge SET status = ?, updated_at = ?, content_updated_at = ?, deprecation_reason = ?, version = version + 1 WHERE id = ?',
   ).run('deprecated', now, now, reason ?? null, id);
   if (result.changes === 0) return null;
   return getKnowledgeById(id);
@@ -697,17 +697,36 @@ export function updateLinkSyncedAt(id: string, timestamp?: string): void {
 
 /**
  * Align content_updated_at with the remote's updated_at and set synced_at.
+ * Also aligns synced_version to the remote's version.
  * Used during pull when content is identical but timestamps differ (e.g., the
  * remote was pushed by an older version that set content_updated_at = now()).
  * Aligning the timestamp prevents push from re-serializing a different
  * updated_at and creating a spurious commit.
  */
-export function alignContentTimestamp(id: string, remoteUpdatedAt: string): void {
+export function alignContentTimestamp(id: string, remoteUpdatedAt: string, remoteVersion?: number): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+  if (remoteVersion !== undefined) {
+    db.prepare(
+      'UPDATE knowledge SET content_updated_at = ?, synced_at = ?, synced_version = ? WHERE id = ?',
+    ).run(remoteUpdatedAt, now, remoteVersion, id);
+  } else {
+    db.prepare(
+      'UPDATE knowledge SET content_updated_at = ?, synced_at = ? WHERE id = ?',
+    ).run(remoteUpdatedAt, now, id);
+  }
+}
+
+/**
+ * Update the synced_version for an entry without changing content.
+ * Used during pull/push to track which version has been reconciled with the remote.
+ */
+export function updateSyncedVersion(id: string, version: number): void {
   const db = getDb();
   const now = new Date().toISOString();
   db.prepare(
-    'UPDATE knowledge SET content_updated_at = ?, synced_at = ? WHERE id = ?',
-  ).run(remoteUpdatedAt, now, id);
+    'UPDATE knowledge SET synced_version = ?, synced_at = ? WHERE id = ?',
+  ).run(version, now, id);
 }
 
 /** Insert a knowledge entry with a specific ID (used during sync import) */
@@ -726,15 +745,17 @@ export interface ImportKnowledgeParams {
   parent_page_id?: string | null;
   created_at: string;
   updated_at: string;
+  version?: number;
 }
 
 export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
   const db = getDb();
   const now = new Date().toISOString();
+  const version = params.version ?? 1;
 
   const stmt = db.prepare(`
-    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, declaration, parent_page_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?, ?)
+    INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, created_at, updated_at, content_updated_at, last_accessed_at, access_count, strength, status, synced_at, deprecation_reason, declaration, parent_page_id, version, synced_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1.0, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -755,6 +776,8 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
     params.deprecation_reason ?? null,
     params.declaration ?? null,
     params.parent_page_id ?? null,
+    version,
+    version,             // synced_version = version for imports
   );
 
   return getKnowledgeById(params.id)!;
@@ -816,6 +839,7 @@ export function updateKnowledgeContent(
     deprecation_reason?: string | null;
     declaration?: string | null;
     parent_page_id?: string | null;
+    version?: number;
   },
   /** When set, use this value for content_updated_at instead of now(). Used by pull to preserve remote timestamps and prevent drift. */
   contentUpdatedAtOverride?: string,
@@ -825,6 +849,11 @@ export function updateKnowledgeContent(
 
   const sets: string[] = ['content_updated_at = ?', 'synced_at = ?'];
   const values: unknown[] = [contentUpdatedAtOverride ?? now, now];
+
+  if (fields.version !== undefined) {
+    sets.push('version = ?', 'synced_version = ?');
+    values.push(fields.version, fields.version);
+  }
 
   if (fields.type !== undefined) {
     sets.push('type = ?');

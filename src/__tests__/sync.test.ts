@@ -120,6 +120,7 @@ describe('sync layer', () => {
         status: 'active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       const entry = parseEntryJSON(raw);
@@ -170,6 +171,7 @@ describe('sync layer', () => {
         status: 'active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       writeEntryFile(repoPath, entry);
@@ -196,6 +198,7 @@ describe('sync layer', () => {
         status: 'active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       writeEntryFile(repoPath, entry);
@@ -296,6 +299,7 @@ describe('sync layer', () => {
         status: 'active',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        version: 1,
       };
       ensureRepoStructure(repoPath);
       writeEntryFile(repoPath, entry);
@@ -338,13 +342,13 @@ describe('sync layer', () => {
       // Entry 1 in repo 1
       ensureRepoStructure(repoPath);
       writeEntryFile(repoPath, {
-        id: id1, type: 'fact', title: 'E1', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        id: id1, type: 'fact', title: 'E1', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), version: 1
       });
 
       // Entry 2 in repo 2
       ensureRepoStructure(repoPath2);
       writeEntryFile(repoPath2, {
-        id: id2, type: 'fact', title: 'E2', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        id: id2, type: 'fact', title: 'E2', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), version: 1
       });
 
       const result = await pull(multiConfig);
@@ -391,59 +395,45 @@ describe('sync layer', () => {
     });
   });
 
-  describe('conflict detection', () => {
-    it('should return no_change when timestamps match', () => {
-      const now = new Date().toISOString();
-      const local: any = { content_updated_at: now, synced_at: now };
-      const remote: any = { updated_at: now };
+  describe('conflict detection (version-based)', () => {
+    it('should return no_change when neither side changed', () => {
+      // Both at version 1, synced_version = 1
+      const local: any = { version: 1, synced_version: 1 };
+      const remote: any = { version: 1 };
       
       const result = detectConflict(local, remote);
       expect(result.action).toBe('no_change');
     });
 
-    it('should return remote_wins when remote is newer', () => {
-      const past = '2020-01-01T00:00:00.000Z';
-      const now = new Date().toISOString();
-      // local hasn't changed since sync (synced_at >= content_updated_at)
-      const local: any = { content_updated_at: past, synced_at: past, content: 'old' };
-      // remote has changed (updated_at > synced_at)
-      const remote: any = { updated_at: now, content: 'new' };
+    it('should return remote_wins when only remote advanced', () => {
+      // local at version 1 (not changed since sync), remote at version 2
+      const local: any = { version: 1, synced_version: 1, content: 'old' };
+      const remote: any = { version: 2, content: 'new' };
 
       const result = detectConflict(local, remote);
       expect(result.action).toBe('remote_wins');
     });
 
-    it('should return local_wins when local is newer', () => {
-      const past = '2020-01-01T00:00:00.000Z';
-      const now = new Date().toISOString();
-      // local changed since sync (content_updated_at > synced_at)
-      const local: any = { content_updated_at: now, synced_at: past, content: 'new' };
-      // remote hasn't changed since sync (updated_at <= synced_at)
-      const remote: any = { updated_at: past, content: 'old' };
+    it('should return local_wins when only local advanced', () => {
+      // local at version 2 (changed since sync), remote still at 1
+      const local: any = { version: 2, synced_version: 1, content: 'new' };
+      const remote: any = { version: 1, content: 'old' };
 
       const result = detectConflict(local, remote);
       expect(result.action).toBe('local_wins');
     });
 
-    it('should return conflict when both changed', () => {
-      const past = '2020-01-01T00:00:00.000Z';
-      const now = new Date().toISOString();
-      const future = new Date(Date.now() + 1000).toISOString();
-      
-      // Both changed since sync
-      const local: any = { content_updated_at: now, synced_at: past, content: 'local' };
-      const remote: any = { updated_at: future, content: 'remote' };
+    it('should return conflict when both changed with different content', () => {
+      // Both advanced beyond synced_version=1
+      const local: any = { version: 2, synced_version: 1, content: 'local' };
+      const remote: any = { version: 3, content: 'remote' };
 
       const result = detectConflict(local, remote);
       expect(result.action).toBe('conflict');
     });
 
-    it('should return no_change when remote timestamp differs but content is identical', () => {
-      // Simulates the flip-flop bug: an older version of knowledge-mcp sets
-      // content_updated_at = now() on every pull, producing a different
-      // remote.updated_at with no actual content change.
-      const syncedAt = '2026-01-01T00:00:00.000Z';
-      const remoteTimestamp = '2026-01-01T01:00:00.000Z'; // newer than synced_at
+    it('should return no_change when remote version advanced but content is identical', () => {
+      // remote version advanced but content fields all match
       const local: any = {
         type: 'fact',
         title: 'Test entry',
@@ -453,8 +443,8 @@ describe('sync layer', () => {
         scope: 'company',
         source: 'agent',
         status: 'active',
-        content_updated_at: syncedAt,
-        synced_at: syncedAt,
+        version: 1,
+        synced_version: 1,
       };
       const remote: any = {
         type: 'fact',
@@ -465,18 +455,14 @@ describe('sync layer', () => {
         scope: 'company',
         source: 'agent',
         status: 'active',
-        updated_at: remoteTimestamp,
+        version: 2,
       };
 
       const result = detectConflict(local, remote);
-      // remote.updated_at > synced_at so remoteChanged=true, but content is
-      // identical → should be no_change, not remote_wins
       expect(result.action).toBe('no_change');
     });
 
-    it('should return no_change when local timestamp differs but content is identical', () => {
-      const syncedAt = '2026-01-01T00:00:00.000Z';
-      const localTimestamp = '2026-01-01T01:00:00.000Z';
+    it('should return no_change when local version advanced but content is identical', () => {
       const local: any = {
         type: 'fact',
         title: 'Test entry',
@@ -486,8 +472,8 @@ describe('sync layer', () => {
         scope: 'company',
         source: 'agent',
         status: 'active',
-        content_updated_at: localTimestamp, // newer than synced_at
-        synced_at: syncedAt,
+        version: 2,
+        synced_version: 1,
       };
       const remote: any = {
         type: 'fact',
@@ -498,28 +484,25 @@ describe('sync layer', () => {
         scope: 'company',
         source: 'agent',
         status: 'active',
-        updated_at: syncedAt,
+        version: 1,
       };
 
       const result = detectConflict(local, remote);
-      // local content_updated_at > synced_at so localChanged=true, but content
-      // is identical → should be no_change, not local_wins
       expect(result.action).toBe('no_change');
     });
 
-    it('should still return remote_wins when content actually differs', () => {
-      const syncedAt = '2026-01-01T00:00:00.000Z';
+    it('should return remote_wins when content actually differs', () => {
       const local: any = {
         type: 'fact',
         title: 'Old title',
         content: 'Old content',
-        tags: '[]',
+        tags: [],
         project: null,
         scope: 'company',
         source: 'agent',
         status: 'active',
-        content_updated_at: syncedAt,
-        synced_at: syncedAt,
+        version: 1,
+        synced_version: 1,
       };
       const remote: any = {
         type: 'fact',
@@ -530,11 +513,50 @@ describe('sync layer', () => {
         scope: 'company',
         source: 'agent',
         status: 'active',
-        updated_at: '2026-01-01T02:00:00.000Z',
+        version: 2,
       };
 
       const result = detectConflict(local, remote);
       expect(result.action).toBe('remote_wins');
+    });
+
+    it('should treat synced_version=null as 0 (never synced)', () => {
+      // Entry was never synced (synced_version = null), local at version 1
+      const local: any = { version: 1, synced_version: null, content: 'local' };
+      const remote: any = { version: 1, content: 'remote' };
+
+      // Both changed (1 > 0 for both) + content differs → conflict
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('conflict');
+    });
+
+    it('should return no_change when both sides advanced to identical content', () => {
+      const local: any = {
+        type: 'fact',
+        title: 'Converged',
+        content: 'Same final content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        version: 3,
+        synced_version: 1,
+      };
+      const remote: any = {
+        type: 'fact',
+        title: 'Converged',
+        content: 'Same final content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        version: 2,
+      };
+
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('no_change');
     });
   });
 
@@ -687,31 +709,29 @@ describe('sync layer', () => {
     });
   });
 
-  describe('full conflict resolution flow', () => {
-    it('should create conflict entry and contradicts link when both sides changed', async () => {
-      const past = '2025-01-01T00:00:00.000Z';
-
-      // 1. Create and sync an entry
+  describe('full conflict resolution flow (flipped — remote wins)', () => {
+    it('should save local as conflict copy and accept remote as canonical', async () => {
+      // 1. Create and sync an entry (version=1, synced_version=1 after push)
       const entry = insertKnowledge({ title: 'Original', type: 'fact', content: 'Original content' });
-      syncWriteEntry(entry);
-      gitCommitAll(repoPath, 'initial');
+      await push(config);
 
-      // 2. Set synced_at to a known past time so we can clearly distinguish local/remote changes
-      updateSyncedAt(entry.id, past);
+      // Verify synced_version is set after push
+      const afterPush = getKnowledgeById(entry.id);
+      expect(afterPush!.synced_version).toBe(1);
 
-      // 3. Modify locally using updateKnowledgeFields (sets content_updated_at = now > past synced_at)
+      // 2. Modify locally using updateKnowledgeFields (bumps version to 2)
       updateKnowledgeFields(entry.id, {
         title: 'Local Version',
         content: 'Local content',
       });
 
-      // Verify local entry state: content_updated_at > synced_at
+      // Verify local version advanced
       const local = getKnowledgeById(entry.id);
-      expect(local!.content_updated_at! > local!.synced_at!).toBe(true);
+      expect(local!.version).toBe(2);
+      expect(local!.synced_version).toBe(1); // synced_version stays at 1
 
-      // 4. Simulate remote changes by writing a different version to repo
-      //    Remote updated_at must also be > past synced_at
-      const remoteTime = new Date().toISOString();
+      // 3. Simulate remote changes by writing a different version to repo
+      //    Remote version must also be > synced_version (1)
       writeEntryFile(repoPath, {
         id: entry.id,
         type: 'fact',
@@ -723,55 +743,55 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: entry.created_at,
-        updated_at: remoteTime,
+        updated_at: new Date().toISOString(),
+        version: 3,
       });
 
-      // 5. Pull — should detect conflict (both local and remote changed since synced_at)
+      // 4. Pull — should detect conflict (both local and remote advanced beyond synced_version=1)
       const result = await pull(config);
       expect(result.conflicts).toBe(1);
       expect(result.conflict_details).toHaveLength(1);
       expect(result.conflict_details[0].original_id).toBe(entry.id);
       expect(result.conflict_details[0].title).toBe('Remote Version');
 
-      // 6. Original entry should be flagged needs_revalidation
-      const original = getKnowledgeById(entry.id);
-      expect(original!.status).toBe('needs_revalidation');
+      // 5. Original entry should now have REMOTE content (remote wins as canonical)
+      const canonical = getKnowledgeById(entry.id);
+      expect(canonical!.title).toBe('Remote Version');
+      expect(canonical!.content).toBe('Remote content');
+      // Canonical should NOT be flagged needs_revalidation
+      expect(canonical!.status).toBe('active');
 
-      // 7. Conflict entry should exist with [Sync Conflict] prefix
+      // 6. Conflict entry should exist with [Sync Conflict] prefix and LOCAL content
       const conflictId = result.conflict_details[0].conflict_id;
       const conflict = getKnowledgeById(conflictId);
       expect(conflict).toBeTruthy();
-      expect(conflict!.title).toBe('[Sync Conflict] Remote Version');
-      expect(conflict!.content).toBe('Remote content');
+      expect(conflict!.title).toBe('[Sync Conflict] Local Version');
+      expect(conflict!.content).toBe('Local content');
+      // Conflict copy gets needs_revalidation status so agents know to resolve it
       expect(conflict!.status).toBe('needs_revalidation');
+      expect(conflict!.source).toBe('sync:conflict');
 
-      // 8. Should have a contradicts link from conflict → original
+      // 7. Should have a conflicts_with link from conflict copy → canonical
       const links = getAllLinks();
       const conflictLink = links.find(
-        (l) => l.source_id === conflictId && l.target_id === entry.id && l.link_type === 'contradicts'
+        (l) => l.source_id === conflictId && l.target_id === entry.id && l.link_type === 'conflicts_with'
       );
       expect(conflictLink).toBeTruthy();
       expect(conflictLink!.source).toBe('sync:conflict');
     });
 
     it('should not conflict when both sides made identical changes', async () => {
-      const past = '2025-01-01T00:00:00.000Z';
-
       // 1. Create and sync an entry
       const entry = insertKnowledge({ title: 'Same', type: 'fact', content: 'Same content' });
-      syncWriteEntry(entry);
-      gitCommitAll(repoPath, 'initial');
+      await push(config);
 
-      // 2. Set synced_at to past so both sides appear changed
-      updateSyncedAt(entry.id, past);
-
-      // 3. Modify locally (content_updated_at = now > past)
+      // 2. Modify locally (bumps version to 2)
       updateKnowledgeFields(entry.id, {
         title: 'Updated Same',
         content: 'Updated content',
       });
 
-      // 4. Write identical remote changes (updated_at = now > past)
+      // 3. Write identical remote changes with advanced version
       //    Must match all content fields (including source='unknown' default)
       const localEntry = getKnowledgeById(entry.id)!;
       writeEntryFile(repoPath, {
@@ -786,9 +806,10 @@ describe('sync layer', () => {
         status: localEntry.status,
         created_at: entry.created_at,
         updated_at: new Date().toISOString(),
+        version: 5, // remote advanced but content is identical
       });
 
-      // 5. Pull — should detect no conflict (identical content despite both sides changing)
+      // 4. Pull — should detect no conflict (identical content despite both sides changing)
       const result = await pull(config);
       expect(result.conflicts).toBe(0);
     });
@@ -973,7 +994,7 @@ describe('sync layer', () => {
       expect(getRepoLinkIds(repoPath).has(link.id)).toBe(false);
     });
 
-    it('should not push conflict-related links', async () => {
+    it('should not push conflict-related links (sync:conflict source)', async () => {
       const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
 
@@ -988,6 +1009,24 @@ describe('sync layer', () => {
 
       const result = await push(config);
       // Should push entries but not the conflict link
+      expect(result.new_links).toBe(0);
+    });
+
+    it('should not push conflicts_with links', async () => {
+      const e1 = insertKnowledge({ title: 'A2', type: 'fact', content: '' });
+      const e2 = insertKnowledge({ title: 'B2', type: 'fact', content: '' });
+
+      // Create a conflicts_with link (new link type for sync conflicts)
+      insertLink({
+        sourceId: e1.id,
+        targetId: e2.id,
+        linkType: 'conflicts_with',
+        description: 'sync conflict link',
+        source: 'sync:conflict',
+      });
+
+      const result = await push(config);
+      // Should push entries but not the conflicts_with link
       expect(result.new_links).toBe(0);
     });
 
@@ -1018,6 +1057,39 @@ describe('sync layer', () => {
     it('should have synced_at as null on new entries', () => {
       const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
       expect(entry.synced_at).toBeNull();
+    });
+
+    it('should start with version 1 and synced_version null', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
+      expect(entry.version).toBe(1);
+      expect(entry.synced_version).toBeNull();
+    });
+
+    it('should increment version on updateKnowledgeFields', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
+      expect(entry.version).toBe(1);
+
+      const updated = updateKnowledgeFields(entry.id, { title: 'Updated' });
+      expect(updated!.version).toBe(2);
+
+      const updated2 = updateKnowledgeFields(entry.id, { content: 'New content' });
+      expect(updated2!.version).toBe(3);
+    });
+
+    it('should increment version on deprecateKnowledge', () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
+      const deprecated = deprecateKnowledge(entry.id, 'outdated');
+      expect(deprecated!.version).toBe(2);
+    });
+
+    it('should set synced_version after push', async () => {
+      const entry = insertKnowledge({ type: 'fact', title: 'Test', content: 'content' });
+      expect(entry.synced_version).toBeNull();
+
+      await push(config);
+
+      const afterPush = getKnowledgeById(entry.id);
+      expect(afterPush!.synced_version).toBe(1);
     });
   });
 
@@ -1122,6 +1194,7 @@ describe('sync layer', () => {
         deprecation_reason: 'Replaced by automated linting',
         created_at: '2025-01-01T00:00:00.000Z',
         updated_at: '2025-01-02T00:00:00.000Z',
+        version: 1,
       };
 
       // Write entry file to repo
@@ -1254,6 +1327,7 @@ describe('sync layer', () => {
         declaration: 'Write about our microservices architecture',
         created_at: '2025-01-01T00:00:00.000Z',
         updated_at: '2025-01-02T00:00:00.000Z',
+        version: 1,
       };
 
       // Write entry file to repo
@@ -1398,6 +1472,7 @@ describe('sync layer', () => {
         status: 'active',
         created_at: '2025-01-01T00:00:00.000Z',
         updated_at: '2025-01-02T00:00:00.000Z',
+        version: 1,
       };
 
       // Write child entry with parent_page_id
@@ -1414,6 +1489,7 @@ describe('sync layer', () => {
         parent_page_id: parentId,
         created_at: '2025-01-01T00:00:00.000Z',
         updated_at: '2025-01-02T00:00:00.000Z',
+        version: 1,
       };
 
       const entryDir = join(repoPath, 'entries', 'wiki');
@@ -1441,15 +1517,13 @@ describe('sync layer', () => {
         parentPageId: parent1.id,
       });
 
-      // Simulate synced state — set both synced_at and content_updated_at to the past
-      const pastTime = '2025-01-01T00:00:00.000Z';
-      updateSyncedAt(child.id, pastTime);
-      getDb().prepare('UPDATE knowledge SET content_updated_at = ? WHERE id = ?').run(pastTime, child.id);
+      // Simulate synced state — set synced_version = 1 (entry was just synced, not locally modified)
+      getDb().prepare('UPDATE knowledge SET synced_version = 1 WHERE id = ?').run(child.id);
 
-      // Re-fetch so we have the updated timestamps
+      // Re-fetch so we have the updated state
       const localChild = getKnowledgeById(child.id)!;
 
-      // Remote has different parent_page_id
+      // Remote has different parent_page_id and version advanced beyond synced_version
       const remoteJSON: EntryJSON = {
         id: child.id,
         type: 'wiki',
@@ -1463,6 +1537,7 @@ describe('sync layer', () => {
         parent_page_id: parent2.id,
         created_at: child.created_at,
         updated_at: '2025-06-01T00:00:00.000Z',
+        version: 2,
       };
 
       const result = detectConflict(localChild, remoteJSON);
@@ -1472,20 +1547,18 @@ describe('sync layer', () => {
 
   describe('timestamp preservation on pull', () => {
     it('should preserve remote updated_at as content_updated_at on remote_wins', async () => {
-      // 1. Create local entry and mark as synced in the past
+      // 1. Create local entry and simulate synced state (version=1, synced_version=1)
       const entry = insertKnowledge({
         type: 'fact',
         title: 'Old title',
         content: 'Old content',
       });
-      const pastTime = '2025-01-01T00:00:00.000Z';
-      updateSyncedAt(entry.id, pastTime);
-      // Also set content_updated_at to pastTime so the local entry
-      // appears unchanged since its last sync (otherwise detectConflict
-      // sees localChanged=true because content_updated_at=now() > synced_at).
-      getDb().prepare('UPDATE knowledge SET content_updated_at = ? WHERE id = ?').run(pastTime, entry.id);
+      // Simulate synced state: synced_version = 1, version = 1 (no local changes)
+      getDb().prepare('UPDATE knowledge SET synced_version = 1, synced_at = ? WHERE id = ?')
+        .run(new Date().toISOString(), entry.id);
 
       // 2. Create remote version with updated content and a specific updated_at
+      //    Remote version = 2 (advanced beyond synced_version=1)
       const remoteUpdatedAt = '2025-06-15T12:00:00.000Z';
       ensureRepoStructure(repoPath);
       writeEntryFile(repoPath, {
@@ -1500,6 +1573,7 @@ describe('sync layer', () => {
         status: 'active',
         created_at: entry.created_at,
         updated_at: remoteUpdatedAt,
+        version: 2,
       });
       gitCommitAll(repoPath, 'update entry remotely');
 
@@ -1530,6 +1604,7 @@ describe('sync layer', () => {
         status: 'active',
         created_at: '2025-01-01T00:00:00.000Z',
         updated_at: remoteUpdatedAt,
+        version: 1,
       };
       ensureRepoStructure(repoPath);
       writeEntryFile(repoPath, remoteJSON);

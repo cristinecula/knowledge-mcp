@@ -176,6 +176,15 @@ function migrateSchema(db: Database.Database): void {
     db.exec('CREATE INDEX idx_knowledge_status_strength ON knowledge(status, strength)');
   }
 
+  // Migration 9: Add version and synced_version columns for version-based conflict detection
+  if (!columnNames.has('version')) {
+    db.exec(`
+      ALTER TABLE knowledge ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE knowledge ADD COLUMN synced_version INTEGER;
+      UPDATE knowledge SET synced_version = 1 WHERE synced_at IS NOT NULL;
+    `);
+  }
+
   // Backfill: ensure content_updated_at is set for any rows where it's empty.
   // Only run if there are actually rows to fix (avoids full-table scan on every startup).
   const needsBackfill = db.prepare(

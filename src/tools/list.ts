@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { KNOWLEDGE_TYPES, SCOPES } from '../types.js';
-import { listKnowledge, countKnowledge } from '../db/queries.js';
+import { listKnowledge, countKnowledge, getLinksForEntries } from '../db/queries.js';
 
 export function registerListTool(server: McpServer): void {
   server.registerTool(
@@ -61,7 +61,34 @@ export function registerListTool(server: McpServer): void {
           };
         }
 
+        // Fetch links to detect conflicts_with (batched in 1 query)
+        const allLinks = getLinksForEntries(entries.map((e) => e.id));
+        const warnings: string[] = [];
+
         const results = entries.map((entry) => {
+          const links = allLinks.get(entry.id) ?? [];
+
+          // Check for conflicts_with links (sync conflict indicators)
+          const conflictLinks = links.filter((l) => l.link_type === 'conflicts_with');
+          if (conflictLinks.length > 0) {
+            for (const cl of conflictLinks) {
+              const isConflictCopy = cl.source_id === entry.id;
+              if (isConflictCopy) {
+                warnings.push(
+                  `Entry "${entry.title}" (${entry.id}) is a sync conflict copy. ` +
+                  `The canonical version is ${cl.target_id}. ` +
+                  `Review both versions, update the canonical entry if needed, then delete this conflict copy and its conflicts_with link.`,
+                );
+              } else {
+                warnings.push(
+                  `Entry "${entry.title}" (${entry.id}) has an unresolved sync conflict. ` +
+                  `A conflict copy with local changes exists at ${cl.source_id}. ` +
+                  `Review both versions, update this entry if the local changes should be kept, then delete the conflict copy and its conflicts_with link.`,
+                );
+              }
+            }
+          }
+
           const result: Record<string, unknown> = {
             id: entry.id,
             type: entry.type,
@@ -84,22 +111,23 @@ export function registerListTool(server: McpServer): void {
           return result;
         });
 
+        const responseEnvelope: Record<string, unknown> = {
+          count: results.length,
+          total,
+          offset: effectiveOffset,
+          has_more: (effectiveOffset + results.length) < total,
+          filter: { type, project, scope, status: status ?? 'active+needs_revalidation', sort_by },
+          results,
+        };
+        if (warnings.length > 0) {
+          responseEnvelope.warnings = warnings;
+        }
+
         return {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  count: results.length,
-                  total,
-                  offset: effectiveOffset,
-                  has_more: (effectiveOffset + results.length) < total,
-                  filter: { type, project, scope, status: status ?? 'active+needs_revalidation', sort_by },
-                  results,
-                },
-                null,
-                2,
-              ),
+              text: JSON.stringify(responseEnvelope, null, 2),
             },
           ],
         };

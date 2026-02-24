@@ -1,11 +1,14 @@
 /**
  * Merge logic for sync conflicts.
  *
- * Compares local and remote entries to detect conflicts.
- * When a true conflict is detected (both sides changed since last sync),
- * both versions are kept: the local stays in place, and the remote is
- * stored as a new [Sync Conflict] entry with a 'contradicts' link.
- * Both are flagged as needs_revalidation.
+ * Uses version numbers to detect conflicts. Each content-changing operation
+ * increments the entry's version. synced_version tracks the last version
+ * that was reconciled with the remote. If both local and remote have
+ * advanced beyond synced_version, it's a true conflict.
+ *
+ * When a conflict is detected, the remote version wins as canonical (stays
+ * active), and the local content is saved as a [Sync Conflict] entry with
+ * a 'conflicts_with' link for the agent to resolve.
  */
 
 import type { KnowledgeEntry } from '../types.js';
@@ -20,50 +23,31 @@ export type MergeResult =
 /**
  * Determine the merge action for an entry that exists both locally and remotely.
  *
- * Uses content_updated_at and synced_at to detect true conflicts:
- * - If only remote changed since last sync → remote_wins (apply remote)
- * - If only local changed since last sync → local_wins (keep local)
- * - If both changed since last sync → conflict (keep both)
- * - If neither changed → no_change
+ * Uses version numbers instead of timestamps for conflict detection:
+ * - synced_version: the version number at last successful sync
+ * - local.version: current local version (incremented on every content change)
+ * - remote.version: current remote version (from the JSON file)
  *
- * For entries that have never been synced (synced_at is null),
- * treat as a conflict if both exist with different content.
+ * Logic:
+ * - If neither side advanced beyond synced_version -> no_change
+ * - If only remote advanced -> remote_wins (unless content is identical)
+ * - If only local advanced -> local_wins (unless content is identical)
+ * - If both advanced and content differs -> conflict
+ * - If both advanced but content is identical -> no_change
  */
 export function detectConflict(
   local: KnowledgeEntry,
   remote: EntryJSON,
 ): MergeResult {
-  const syncedAt = local.synced_at;
-  const contentUpdatedAt = local.content_updated_at;
-
-  // If never synced before, compare content
-  if (!syncedAt) {
-    if (contentEquals(local, remote)) {
-      return { action: 'no_change' };
-    }
-    return { action: 'conflict' };
-  }
-
-  // Check if local changed since last sync
-  // content_updated_at is updated when content changes.
-  // If content_updated_at > synced_at, local has changes.
-  const localChanged = contentUpdatedAt ? contentUpdatedAt > syncedAt : false;
-
-  // Check if remote changed since last sync
-  // remote.updated_at is the last time remote changed.
-  // If remote.updated_at > synced_at, remote has changes.
-  // Note: we trust remote timestamp to be roughly accurate or at least monotonic
-  const remoteChanged = remote.updated_at > syncedAt;
+  const syncedVersion = local.synced_version ?? 0;
+  const localChanged = local.version > syncedVersion;
+  const remoteChanged = remote.version > syncedVersion;
 
   if (!localChanged && !remoteChanged) {
     return { action: 'no_change' };
   }
 
   if (remoteChanged && !localChanged) {
-    // Guard: if only timestamps differ but content is identical, treat as no_change.
-    // This prevents flip-flop when an older version of the code sets
-    // content_updated_at = now() on every pull, producing spurious timestamp
-    // differences with no semantic change.
     if (contentEquals(local, remote)) {
       return { action: 'no_change' };
     }
@@ -79,8 +63,6 @@ export function detectConflict(
 
   // Both changed — check if the changes are identical
   if (contentEquals(local, remote)) {
-    // Both changed to the same thing — just update synced_at (handled by no_change logic in pull)
-    // Actually pull logic for no_change just updates synced_at, which is what we want.
     return { action: 'no_change' };
   }
 
@@ -91,7 +73,7 @@ export function detectConflict(
 /**
  * Check if the shared content fields of a local entry match a remote entry.
  */
-function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean {
+export function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean {
   return (
     local.type === remote.type &&
     local.title === remote.title &&
