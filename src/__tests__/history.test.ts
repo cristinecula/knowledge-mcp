@@ -206,7 +206,7 @@ describe('entry version history', () => {
         source: 'unknown',
         status: 'active',
         created_at: entry.created_at,
-        updated_at: entry.updated_at,
+        version: 1,
       }, null, 2) + '\n');
       gitCommitAll(repoPath, 'knowledge: store fact "Test fact"');
 
@@ -222,7 +222,7 @@ describe('entry version history', () => {
         source: 'unknown',
         status: 'active',
         created_at: entry.created_at,
-        updated_at: new Date().toISOString(),
+        version: 2,
       }, null, 2) + '\n');
       gitCommitAll(repoPath, 'knowledge: update fact "Test fact"');
 
@@ -297,13 +297,13 @@ describe('entry version history', () => {
         source: 'unknown',
         status: 'active',
         created_at: entry.created_at,
-        updated_at: entry.updated_at,
+        version: 1,
       };
       writeFileSync(filePath, JSON.stringify(entryJson, null, 2) + '\n');
       gitCommitAll(repoPath, 'add decision');
 
       // Update content
-      const updatedJson = { ...entryJson, content: 'Updated content', updated_at: new Date().toISOString() };
+      const updatedJson = { ...entryJson, content: 'Updated content', version: 2 };
       writeFileSync(filePath, JSON.stringify(updatedJson, null, 2) + '\n');
       gitCommitAll(repoPath, 'update decision');
 
@@ -386,13 +386,13 @@ describe('entry version history', () => {
         source: 'unknown',
         status: 'active',
         created_at: entry.created_at,
-        updated_at: entry.updated_at,
+        version: 1,
       };
       writeFileSync(filePath, JSON.stringify(entryJson, null, 2) + '\n');
       gitCommitAll(repoPath, 'add decision');
 
       // Update content
-      const updatedJson = { ...entryJson, content: 'Updated content', updated_at: new Date().toISOString() };
+      const updatedJson = { ...entryJson, content: 'Updated content', version: 2 };
       writeFileSync(filePath, JSON.stringify(updatedJson, null, 2) + '\n');
       gitCommitAll(repoPath, 'update decision');
 
@@ -427,7 +427,7 @@ describe('entry version history', () => {
         source: 'unknown',
         status: 'active',
         created_at: entry.created_at,
-        updated_at: entry.updated_at,
+        version: 1,
       };
       writeFileSync(filePath, JSON.stringify(entryJson, null, 2) + '\n');
       gitCommitAll(repoPath, 'add fact');

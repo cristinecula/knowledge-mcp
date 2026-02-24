@@ -46,7 +46,6 @@ export interface EntryJSON {
   declaration?: string | null;
   parent_page_id?: string | null;
   created_at: string;
-  updated_at: string;
   version: number;
 }
 
@@ -77,7 +76,6 @@ export function entryToJSON(entry: KnowledgeEntry): EntryJSON {
     source: entry.source,
     status: entry.status,
     created_at: entry.created_at,
-    updated_at: entry.content_updated_at || entry.updated_at,
     version: entry.version,
   };
 
@@ -136,9 +134,8 @@ export function parseEntryJSON(data: unknown): EntryJSON {
   if (typeof obj.created_at !== 'string' || obj.created_at.length === 0) {
     throw new Error('Missing or invalid created_at');
   }
-  if (typeof obj.updated_at !== 'string' || obj.updated_at.length === 0) {
-    throw new Error('Missing or invalid updated_at');
-  }
+  // updated_at is no longer serialized (removed to prevent spurious sync commits
+  // from timestamp drift). Silently ignored if present in old JSON files.
 
   // Scope must be valid (default to 'company' if missing)
   const scope = typeof obj.scope === 'string' && VALID_SCOPES.has(obj.scope)
@@ -193,7 +190,6 @@ export function parseEntryJSON(data: unknown): EntryJSON {
     source,
     status,
     created_at: obj.created_at,
-    updated_at: obj.updated_at,
     version,
   };
 

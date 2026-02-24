@@ -9,7 +9,6 @@ import { existsSync } from 'node:fs';
 import {
   getAllEntries,
   getAllLinks,
-  updateSyncedAt,
   updateSyncedVersion,
   updateLinkSyncedAt,
 } from '../db/queries.js';
@@ -67,7 +66,7 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
   const entryRepoMap = new Map<string, string>();
   
   // Batch all entry processing in a transaction for performance.
-  // Without this, each updateSyncedAt is its own implicit transaction.
+  // Without this, each updateSyncedVersion is its own implicit transaction.
   const db = getDb();
   const processEntries = db.transaction(() => {
     for (const entry of localEntries) {

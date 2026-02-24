@@ -375,7 +375,7 @@ export function seedRemote(
         source: 'seed',
         status: 'active',
         created_at: now,
-        updated_at: now,
+        version: 1,
       };
       writeFileSync(join(tmpDir, 'entries', e.type, `${e.id}.json`), JSON.stringify(json, null, 2) + '\n');
     }

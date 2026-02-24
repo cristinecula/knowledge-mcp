@@ -22,8 +22,6 @@ import {
   importKnowledge,
   importLink,
   updateKnowledgeContent,
-  updateSyncedAt,
-  alignContentTimestamp,
   updateSyncedVersion,
   updateStatus,
   deleteKnowledge,
@@ -128,7 +126,6 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           declaration: remote.declaration ?? null,
           parent_page_id: remote.parent_page_id ?? null,
           created_at: remote.created_at,
-          updated_at: remote.updated_at,
           version: remote.version,
         });
         result.new_entries++;
@@ -150,20 +147,12 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
 
     switch (mergeResult.action) {
       case 'no_change':
-        // Align content_updated_at if needed, and update synced_version
-        if (remote.updated_at !== local.content_updated_at) {
-          alignContentTimestamp(local.id, remote.updated_at, remote.version);
-        } else {
-          // Just update synced_version to reflect we're in sync
-          updateSyncedVersion(local.id, remote.version);
-        }
+        // Update synced_version to reflect we're in sync
+        updateSyncedVersion(local.id, remote.version);
         break;
 
       case 'remote_wins':
         // Apply remote changes to local (keep local memory fields)
-        // Pass remote.updated_at as content_updated_at override to prevent
-        // timestamp drift: the JSON updated_at roundtrips cleanly through
-        // push -> pull cycles without generating spurious commits.
         updateKnowledgeContent(local.id, {
           type: remote.type as KnowledgeType,
           title: remote.title,
@@ -173,12 +162,11 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           scope: remote.scope as Scope,
           source: remote.source,
           status: remote.status as Status,
-          updated_at: remote.updated_at,
           deprecation_reason: remote.deprecation_reason ?? null,
           declaration: remote.declaration ?? null,
           parent_page_id: remote.parent_page_id ?? null,
           version: remote.version,
-        }, remote.updated_at);
+        });
         result.updated++;
 
         // Re-generate embedding
@@ -227,12 +215,11 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
           scope: remote.scope as Scope,
           source: remote.source,
           status: remote.status as Status,
-          updated_at: remote.updated_at,
           deprecation_reason: remote.deprecation_reason ?? null,
           declaration: remote.declaration ?? null,
           parent_page_id: remote.parent_page_id ?? null,
           version: remote.version,
-        }, remote.updated_at);
+        });
 
         // Step 3: Create conflicts_with link from conflict copy -> canonical
         try {

@@ -119,7 +119,6 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
         version: 1,
       };
 
@@ -170,7 +169,6 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
         version: 1,
       };
 
@@ -197,7 +195,6 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
         version: 1,
       };
 
@@ -298,9 +295,9 @@ describe('sync layer', () => {
         source: 'remote',
         status: 'active',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
         version: 1,
       };
+
       ensureRepoStructure(repoPath);
       writeEntryFile(repoPath, entry);
 
@@ -342,13 +339,13 @@ describe('sync layer', () => {
       // Entry 1 in repo 1
       ensureRepoStructure(repoPath);
       writeEntryFile(repoPath, {
-        id: id1, type: 'fact', title: 'E1', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), version: 1
+        id: id1, type: 'fact', title: 'E1', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), version: 1
       });
 
       // Entry 2 in repo 2
       ensureRepoStructure(repoPath2);
       writeEntryFile(repoPath2, {
-        id: id2, type: 'fact', title: 'E2', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), version: 1
+        id: id2, type: 'fact', title: 'E2', content: '', tags: [], project: null, scope: 'company', source: 'remote', status: 'active', created_at: new Date().toISOString(), version: 1
       });
 
       const result = await pull(multiConfig);
@@ -743,7 +740,6 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: entry.created_at,
-        updated_at: new Date().toISOString(),
         version: 3,
       });
 
@@ -805,7 +801,6 @@ describe('sync layer', () => {
         source: localEntry.source,
         status: localEntry.status,
         created_at: entry.created_at,
-        updated_at: new Date().toISOString(),
         version: 5, // remote advanced but content is identical
       });
 
@@ -1123,7 +1118,7 @@ describe('sync layer', () => {
         status: 'deprecated',
         deprecation_reason: 'No longer relevant',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       const parsed = parseEntryJSON(raw);
@@ -1143,7 +1138,7 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       const parsed = parseEntryJSON(raw);
@@ -1193,7 +1188,6 @@ describe('sync layer', () => {
         status: 'deprecated',
         deprecation_reason: 'Replaced by automated linting',
         created_at: '2025-01-01T00:00:00.000Z',
-        updated_at: '2025-01-02T00:00:00.000Z',
         version: 1,
       };
 
@@ -1248,7 +1242,7 @@ describe('sync layer', () => {
         status: 'active',
         declaration: 'Describe the API layer',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       const parsed = parseEntryJSON(raw);
@@ -1268,7 +1262,7 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       const parsed = parseEntryJSON(raw);
@@ -1326,7 +1320,6 @@ describe('sync layer', () => {
         status: 'active',
         declaration: 'Write about our microservices architecture',
         created_at: '2025-01-01T00:00:00.000Z',
-        updated_at: '2025-01-02T00:00:00.000Z',
         version: 1,
       };
 
@@ -1387,7 +1380,7 @@ describe('sync layer', () => {
         status: 'active',
         parent_page_id: parentId,
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       const parsed = parseEntryJSON(raw);
@@ -1407,7 +1400,7 @@ describe('sync layer', () => {
         status: 'active',
         parent_page_id: 'not-a-uuid',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       expect(() => parseEntryJSON(raw)).toThrow('Invalid parent_page_id');
@@ -1425,7 +1418,7 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        version: 1,
       };
 
       const parsed = parseEntryJSON(raw);
@@ -1471,7 +1464,6 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: '2025-01-01T00:00:00.000Z',
-        updated_at: '2025-01-02T00:00:00.000Z',
         version: 1,
       };
 
@@ -1488,7 +1480,6 @@ describe('sync layer', () => {
         status: 'active',
         parent_page_id: parentId,
         created_at: '2025-01-01T00:00:00.000Z',
-        updated_at: '2025-01-02T00:00:00.000Z',
         version: 1,
       };
 
@@ -1536,7 +1527,6 @@ describe('sync layer', () => {
         status: 'active',
         parent_page_id: parent2.id,
         created_at: child.created_at,
-        updated_at: '2025-06-01T00:00:00.000Z',
         version: 2,
       };
 
@@ -1545,53 +1535,10 @@ describe('sync layer', () => {
     });
   });
 
-  describe('timestamp preservation on pull', () => {
-    it('should preserve remote updated_at as content_updated_at on remote_wins', async () => {
-      // 1. Create local entry and simulate synced state (version=1, synced_version=1)
-      const entry = insertKnowledge({
-        type: 'fact',
-        title: 'Old title',
-        content: 'Old content',
-      });
-      // Simulate synced state: synced_version = 1, version = 1 (no local changes)
-      getDb().prepare('UPDATE knowledge SET synced_version = 1, synced_at = ? WHERE id = ?')
-        .run(new Date().toISOString(), entry.id);
-
-      // 2. Create remote version with updated content and a specific updated_at
-      //    Remote version = 2 (advanced beyond synced_version=1)
-      const remoteUpdatedAt = '2025-06-15T12:00:00.000Z';
-      ensureRepoStructure(repoPath);
-      writeEntryFile(repoPath, {
-        id: entry.id,
-        type: 'fact',
-        title: 'New title',
-        content: 'New content',
-        tags: [],
-        project: null,
-        scope: 'company',
-        source: 'remote',
-        status: 'active',
-        created_at: entry.created_at,
-        updated_at: remoteUpdatedAt,
-        version: 2,
-      });
-      gitCommitAll(repoPath, 'update entry remotely');
-
-      // 3. Pull — remote should win (local hasn't changed since sync)
-      const result = await pull(config);
-      expect(result.updated).toBe(1);
-
-      // 4. Verify content_updated_at matches the remote's updated_at (not now())
-      const updated = getKnowledgeById(entry.id);
-      expect(updated).not.toBeNull();
-      expect(updated!.content_updated_at).toBe(remoteUpdatedAt);
-      expect(updated!.title).toBe('New title');
-    });
-
+  describe('pull→push roundtrip stability', () => {
     it('should produce byte-identical JSON after pull→push roundtrip', async () => {
-      // 1. Write a remote entry with a known updated_at
+      // updated_at is no longer serialized — the JSON should be stable across roundtrips
       const remoteId = '00000000-0000-4000-a000-000000000098';
-      const remoteUpdatedAt = '2025-06-15T12:00:00.000Z';
       const remoteJSON: EntryJSON = {
         id: remoteId,
         type: 'fact',
@@ -1603,21 +1550,20 @@ describe('sync layer', () => {
         source: 'agent',
         status: 'active',
         created_at: '2025-01-01T00:00:00.000Z',
-        updated_at: remoteUpdatedAt,
         version: 1,
       };
       ensureRepoStructure(repoPath);
       writeEntryFile(repoPath, remoteJSON);
       gitCommitAll(repoPath, 'add entry');
 
-      // 2. Pull — imports the entry
+      // Pull — imports the entry
       const pullResult = await pull(config);
       expect(pullResult.new_entries).toBe(1);
 
-      // 3. Push — should write byte-identical JSON
+      // Push — should write byte-identical JSON (no updated_at drift)
       await push(config);
 
-      // 4. Read the file back and compare
+      // Read the file back and compare
       const fileContent = readEntryFileRaw(repoPath, 'fact', remoteId);
       const expected = JSON.stringify(remoteJSON, null, 2) + '\n';
       expect(fileContent).toBe(expected);

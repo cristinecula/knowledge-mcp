@@ -696,28 +696,6 @@ export function updateLinkSyncedAt(id: string, timestamp?: string): void {
 }
 
 /**
- * Align content_updated_at with the remote's updated_at and set synced_at.
- * Also aligns synced_version to the remote's version.
- * Used during pull when content is identical but timestamps differ (e.g., the
- * remote was pushed by an older version that set content_updated_at = now()).
- * Aligning the timestamp prevents push from re-serializing a different
- * updated_at and creating a spurious commit.
- */
-export function alignContentTimestamp(id: string, remoteUpdatedAt: string, remoteVersion?: number): void {
-  const db = getDb();
-  const now = new Date().toISOString();
-  if (remoteVersion !== undefined) {
-    db.prepare(
-      'UPDATE knowledge SET content_updated_at = ?, synced_at = ?, synced_version = ? WHERE id = ?',
-    ).run(remoteUpdatedAt, now, remoteVersion, id);
-  } else {
-    db.prepare(
-      'UPDATE knowledge SET content_updated_at = ?, synced_at = ? WHERE id = ?',
-    ).run(remoteUpdatedAt, now, id);
-  }
-}
-
-/**
  * Update the synced_version for an entry without changing content.
  * Used during pull/push to track which version has been reconciled with the remote.
  */
@@ -744,7 +722,6 @@ export interface ImportKnowledgeParams {
   declaration?: string | null;
   parent_page_id?: string | null;
   created_at: string;
-  updated_at: string;
   version?: number;
 }
 
@@ -768,8 +745,8 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
     params.scope ?? 'company',
     params.source ?? 'unknown',
     params.created_at,
-    params.updated_at,
-    params.updated_at,   // content_updated_at = updated_at for imports
+    now,                  // updated_at = now (local timestamp)
+    now,                  // content_updated_at = now (local timestamp)
     now,                  // last_accessed_at = now (personal)
     params.status ?? 'active',
     now,                  // synced_at = now
@@ -835,20 +812,17 @@ export function updateKnowledgeContent(
     scope?: Scope;
     source?: string;
     status?: Status;
-    updated_at?: string;
     deprecation_reason?: string | null;
     declaration?: string | null;
     parent_page_id?: string | null;
     version?: number;
   },
-  /** When set, use this value for content_updated_at instead of now(). Used by pull to preserve remote timestamps and prevent drift. */
-  contentUpdatedAtOverride?: string,
 ): KnowledgeEntry | null {
   const db = getDb();
   const now = new Date().toISOString();
 
-  const sets: string[] = ['content_updated_at = ?', 'synced_at = ?'];
-  const values: unknown[] = [contentUpdatedAtOverride ?? now, now];
+  const sets: string[] = ['content_updated_at = ?', 'updated_at = ?', 'synced_at = ?'];
+  const values: unknown[] = [now, now, now];
 
   if (fields.version !== undefined) {
     sets.push('version = ?', 'synced_version = ?');
@@ -886,10 +860,6 @@ export function updateKnowledgeContent(
   if (fields.status !== undefined) {
     sets.push('status = ?');
     values.push(fields.status);
-  }
-  if (fields.updated_at !== undefined) {
-    sets.push('updated_at = ?');
-    values.push(fields.updated_at);
   }
   if (fields.deprecation_reason !== undefined) {
     sets.push('deprecation_reason = ?');
