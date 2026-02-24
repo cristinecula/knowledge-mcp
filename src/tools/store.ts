@@ -78,7 +78,7 @@ export function registerStoreTool(server: McpServer): void {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(entry, null, 2),
+              text: JSON.stringify(entry),
             },
           ],
         };

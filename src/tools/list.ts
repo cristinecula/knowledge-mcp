@@ -129,7 +129,7 @@ export function registerListTool(server: McpServer): void {
           content: [
             {
               type: 'text' as const,
-              text: JSON.stringify(responseEnvelope, null, 2),
+              text: JSON.stringify(responseEnvelope),
             },
           ],
         };
