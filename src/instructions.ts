@@ -3,7 +3,8 @@ export const INSTRUCTIONS = `
 
 You have access to a shared knowledge base via MCP tools:
 
-- **Search:** \`query_knowledge\` (text search, auto-reinforces), \`list_knowledge\` (browse/filter)
+- **Search:** \`query_knowledge\` (text search, returns truncated content), \`list_knowledge\` (browse/filter, metadata only)
+- **Read:** \`get_knowledge\` (retrieve full content of an entry by ID)
 - **Write:** \`store_knowledge\`, \`update_knowledge\`, \`delete_knowledge\`
 - **Maintain:** \`reinforce_knowledge\`, \`deprecate_knowledge\`, \`link_knowledge\`
 - **Sync:** \`sync_knowledge\` (git sync is recommended for team use and persistent history)
@@ -11,6 +12,16 @@ You have access to a shared knowledge base via MCP tools:
 
 Use it as persistent memory across sessions. Knowledge that is frequently
 accessed stays strong; unused knowledge naturally fades.
+
+## Reading knowledge efficiently
+
+- \`query_knowledge\` returns **truncated content** (~300 chars) to save context tokens.
+  Use it to find relevant entries by title, content snippets, and metadata.
+- \`get_knowledge\` returns the **full content** of a single entry by ID.
+  Use it when you need to read the complete content after finding an entry via search.
+- \`list_knowledge\` returns **metadata only** (no content). Use it to browse entries
+  by type, project, scope, or status.
+- Both \`query_knowledge\` and \`get_knowledge\` auto-reinforce entries (boost memory strength).
 
 ## When starting a session
 

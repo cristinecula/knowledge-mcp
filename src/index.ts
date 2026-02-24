@@ -15,6 +15,7 @@ import { getAllEntries } from './db/queries.js';
 import { INSTRUCTIONS } from './instructions.js';
 import { registerStoreTool } from './tools/store.js';
 import { registerQueryTool } from './tools/query.js';
+import { registerGetTool } from './tools/get.js';
 import { registerListTool } from './tools/list.js';
 import { registerReinforceTool } from './tools/reinforce.js';
 import { registerDeprecateTool } from './tools/deprecate.js';
@@ -237,6 +238,7 @@ async function main(): Promise<void> {
   // Register all tools
   registerStoreTool(server);
   registerQueryTool(server);
+  registerGetTool(server);
   registerListTool(server);
   registerReinforceTool(server);
   registerDeprecateTool(server);
@@ -246,7 +248,7 @@ async function main(): Promise<void> {
   registerSyncTool(server);
   registerHistoryTools(server);
 
-  const toolCount = isSyncEnabled() ? '11 tools registered (sync enabled)' : '11 tools registered (sync disabled)';
+  const toolCount = isSyncEnabled() ? '12 tools registered (sync enabled)' : '12 tools registered (sync disabled)';
   console.error(toolCount);
 
   // Start graph visualization server

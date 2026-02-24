@@ -5,6 +5,17 @@ import { searchKnowledge, batchRecordAccess, getLinksForEntries } from '../db/qu
 import { getEmbeddingProvider } from '../embeddings/provider.js';
 import { vectorSearch, reciprocalRankFusion, type ScoredEntry } from '../embeddings/similarity.js';
 
+export const CONTENT_TRUNCATE_LENGTH = 300;
+
+export function truncateContent(content: string): string {
+  if (content.length <= CONTENT_TRUNCATE_LENGTH) return content;
+  // Find last space before limit to avoid cutting mid-word
+  const truncated = content.slice(0, CONTENT_TRUNCATE_LENGTH);
+  const lastSpace = truncated.lastIndexOf(' ');
+  const cutPoint = lastSpace > CONTENT_TRUNCATE_LENGTH * 0.5 ? lastSpace : CONTENT_TRUNCATE_LENGTH;
+  return content.slice(0, cutPoint) + '… (truncated, use `get_knowledge` for full content)';
+}
+
 export function registerQueryTool(server: McpServer): void {
   server.registerTool(
     'query_knowledge',
@@ -14,7 +25,8 @@ export function registerQueryTool(server: McpServer): void {
         'Results are ranked by relevance multiplied by memory strength. ' +
         'Accessing knowledge automatically reinforces it (increases its strength), ' +
         'so frequently useful knowledge naturally persists. ' +
-        'Use this to find conventions, decisions, patterns, pitfalls, and other team knowledge.',
+        'Use this to find conventions, decisions, patterns, pitfalls, and other team knowledge. ' +
+        'Content is truncated in results — use `get_knowledge` to read full entries.',
       inputSchema: {
         query: z.string().describe('Free-text search query (searches title, content, and tags)'),
         type: z.enum(KNOWLEDGE_TYPES).optional().describe('Filter by knowledge type'),
@@ -126,7 +138,7 @@ export function registerQueryTool(server: McpServer): void {
             id: entry.id,
             type: entry.type,
             title: entry.title,
-            content: entry.content,
+            content: truncateContent(entry.content),
             tags: entry.tags,
             project: entry.project,
             scope: entry.scope,

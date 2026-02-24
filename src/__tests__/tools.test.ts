@@ -899,3 +899,104 @@ describe('flag_reason workflow', () => {
     expect(found!.flag_reason).toBe('Information is incorrect');
   });
 });
+
+// === Content truncation ===
+
+describe('content truncation', () => {
+  it('should not truncate short content', async () => {
+    const { truncateContent } = await import('../tools/query.js');
+    const short = 'This is short content.';
+    expect(truncateContent(short)).toBe(short);
+  });
+
+  it('should truncate long content at word boundary', async () => {
+    const { truncateContent, CONTENT_TRUNCATE_LENGTH } = await import('../tools/query.js');
+    const long = 'word '.repeat(100); // 500 chars
+    const result = truncateContent(long);
+    // Should be truncated
+    expect(result).toContain('… (truncated, use `get_knowledge` for full content)');
+    // Content portion (before the truncation marker) should be <= CONTENT_TRUNCATE_LENGTH
+    const contentPart = result.split('…')[0];
+    expect(contentPart.length).toBeLessThanOrEqual(CONTENT_TRUNCATE_LENGTH);
+    // Should not cut mid-word — content part should end with a complete word
+    // (the last char before the split is a word char, preceded by a full word)
+    expect(contentPart).toMatch(/\bword\s*$/)
+  });
+
+  it('should truncate at exact limit when no word boundary found in latter half', async () => {
+    const { truncateContent, CONTENT_TRUNCATE_LENGTH } = await import('../tools/query.js');
+    // A single long "word" with no spaces
+    const noSpaces = 'a'.repeat(400);
+    const result = truncateContent(noSpaces);
+    expect(result).toContain('… (truncated, use `get_knowledge` for full content)');
+    // Should cut at exactly CONTENT_TRUNCATE_LENGTH since no space exists
+    const contentPart = result.split('…')[0];
+    expect(contentPart.length).toBe(CONTENT_TRUNCATE_LENGTH);
+  });
+
+  it('should return content as-is when exactly at the limit', async () => {
+    const { truncateContent, CONTENT_TRUNCATE_LENGTH } = await import('../tools/query.js');
+    const exact = 'x'.repeat(CONTENT_TRUNCATE_LENGTH);
+    expect(truncateContent(exact)).toBe(exact);
+  });
+});
+
+// === Get knowledge workflow ===
+
+describe('get knowledge workflow', () => {
+  it('should retrieve full entry content by ID', () => {
+    const longContent = 'This is a detailed entry. '.repeat(50);
+    const entry = insertKnowledge({
+      type: 'fact',
+      title: 'Detailed entry',
+      content: longContent,
+      tags: ['detail'],
+    });
+
+    const retrieved = getKnowledgeById(entry.id);
+    expect(retrieved).toBeDefined();
+    expect(retrieved!.content).toBe(longContent);
+    expect(retrieved!.title).toBe('Detailed entry');
+    expect(retrieved!.type).toBe('fact');
+  });
+
+  it('should return null for non-existent ID', () => {
+    const result = getKnowledgeById('00000000-0000-0000-0000-000000000000');
+    expect(result).toBeNull();
+  });
+
+  it('should return full content including links', () => {
+    const a = insertKnowledge({ type: 'fact', title: 'Source entry', content: 'source content' });
+    const b = insertKnowledge({ type: 'fact', title: 'Target entry', content: 'target content' });
+    insertLink({ sourceId: a.id, targetId: b.id, linkType: 'related' });
+
+    const retrieved = getKnowledgeById(a.id);
+    expect(retrieved).toBeDefined();
+    expect(retrieved!.content).toBe('source content');
+
+    const links = getLinksForEntry(a.id);
+    expect(links).toHaveLength(1);
+    expect(links[0].link_type).toBe('related');
+  });
+
+  it('should return full content that would be truncated in query results', async () => {
+    const { truncateContent } = await import('../tools/query.js');
+    const longContent = 'A '.repeat(300); // 600 chars
+    const entry = insertKnowledge({
+      type: 'fact',
+      title: 'Long content entry for query truncation test',
+      content: longContent,
+    });
+
+    // Verify query would truncate this
+    const truncated = truncateContent(longContent);
+    expect(truncated).toContain('… (truncated');
+    expect(truncated.length).toBeLessThan(longContent.length);
+
+    // But getKnowledgeById returns full content
+    const full = getKnowledgeById(entry.id);
+    expect(full).toBeDefined();
+    expect(full!.content).toBe(longContent);
+    expect(full!.content.length).toBe(600);
+  });
+});
