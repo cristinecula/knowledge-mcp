@@ -35,6 +35,12 @@ function assertWithinRoot(filePath: string, rootPath: string): void {
 // Avoids ~9 existsSync calls on every write-through after the first check.
 const verifiedRepos = new Set<string>();
 
+/** Invalidate the structure cache for a repo path. Call after operations
+ *  that may remove directories (e.g., `git clean -fd`). */
+export function invalidateRepoCache(repoPath: string): void {
+  verifiedRepos.delete(repoPath);
+}
+
 /** Ensure the sync repo directory structure exists. Caches result per repo path. */
 export function ensureRepoStructure(repoPath: string): void {
   if (verifiedRepos.has(repoPath)) return;

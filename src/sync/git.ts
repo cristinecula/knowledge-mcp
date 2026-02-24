@@ -14,6 +14,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { invalidateRepoCache } from './fs.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -151,8 +152,11 @@ export async function gitPull(path: string, remote = 'origin'): Promise<boolean>
       // created untracked files). Use checkout to adopt the remote branch
       // instead of pull, which would fail on untracked file conflicts.
       try {
-        // Clean up any untracked files that might conflict
+        // Clean up any untracked files that might conflict.
+        // Invalidate the repo structure cache since git clean removes
+        // directories created by ensureRepoStructure (e.g., links/).
         await execFileAsync('git', ['clean', '-fd'], { cwd: path });
+        invalidateRepoCache(path);
         await execFileAsync('git', ['checkout', '-B', remoteBranch, `${remote}/${remoteBranch}`], {
           cwd: path,
         });
