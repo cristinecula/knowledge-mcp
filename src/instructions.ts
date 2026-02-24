@@ -29,6 +29,10 @@ accessed stays strong; unused knowledge naturally fades.
 - Don't store trivial or ephemeral information. Focus on things that would save time
   if known in a future session — e.g., architectural decisions, non-obvious patterns,
   debugging insights, or "gotchas" that cost time to figure out.
+- Avoid storing volatile numbers that change frequently — exact test counts, line counts,
+  migration counts, file sizes, etc. These go stale quickly and trigger unnecessary
+  revalidation cascades. Describe structure and purpose instead (e.g., "migrations in
+  schema.ts" rather than "7 migrations in schema.ts").
 
 ## When confirming existing knowledge
 
