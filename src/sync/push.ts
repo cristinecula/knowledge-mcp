@@ -64,16 +64,6 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
   // Track which repo each entry belongs to (for deletion logic)
   const entryRepoMap = new Map<string, string>();
   
-  // Pre-load all repo states to correctly calculate new vs updated
-  const initialRepoState = new Map<string, Set<string>>(); // repoPath -> Set<id>
-  for (const repo of config.repos) {
-    if (existsSync(repo.path)) {
-      initialRepoState.set(repo.path, getRepoEntryIds(repo.path));
-    } else {
-      initialRepoState.set(repo.path, new Set());
-    }
-  }
-
   // Batch all entry processing in a transaction for performance.
   // Without this, each updateSyncedAt is its own implicit transaction.
   const db = getDb();
@@ -104,25 +94,12 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
         writeEntryFile(repoPath, json);
         updateSyncedAt(entry.id);
         touchedRepos.add(repoPath);
-      }
-      
-      // Check if new or updated
-      const existingInTarget = initialRepoState.get(repoPath)?.has(entry.id);
-      if (existingInTarget) {
-        result.updated++;
-      } else {
-        // Check if it existed in ANY repo (moved = updated, not new)
-        let existedAnywhere = false;
-        for (const ids of initialRepoState.values()) {
-          if (ids.has(entry.id)) {
-            existedAnywhere = true;
-            break;
-          }
-        }
-        if (existedAnywhere) {
-          result.updated++;
-        } else {
+
+        // Count as new or updated
+        if (existing === null) {
           result.new_entries++;
+        } else {
+          result.updated++;
         }
       }
     }
