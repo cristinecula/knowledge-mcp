@@ -376,7 +376,6 @@ body {
    Shared status badges
    ================================================================ */
 .status-active { background: rgba(26, 127, 55, 0.12); color: var(--wiki-success); }
-.status-dormant { background: rgba(139, 148, 158, 0.12); color: var(--wiki-text-muted); }
 .status-deprecated { background: rgba(207, 34, 46, 0.12); color: var(--wiki-danger); }
 .status-needs_revalidation { background: rgba(154, 103, 0, 0.12); color: var(--wiki-warning); }
 

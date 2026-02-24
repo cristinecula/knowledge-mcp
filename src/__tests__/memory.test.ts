@@ -227,7 +227,7 @@ describe('runMaintenanceSweep', () => {
 
     const result = runMaintenanceSweep();
     expect(result.processed).toBe(2); // A and B (C is deprecated)
-    expect(typeof result.transitioned).toBe('number');
+    // Sweep only recalculates strength — no status transitions
   });
 
   it('should not process wiki entries (exempt from decay)', () => {

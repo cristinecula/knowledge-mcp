@@ -379,7 +379,6 @@ svg {
 }
 
 .status-active { background: #23863622; color: #3fb950; }
-.status-dormant { background: #8b949e22; color: #8b949e; }
 .status-deprecated { background: #f8514922; color: #f85149; }
 .status-needs_revalidation { background: #d2992222; color: #d29922; }
 

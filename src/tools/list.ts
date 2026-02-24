@@ -16,7 +16,7 @@ export function registerListTool(server: McpServer): void {
         project: z.string().optional().describe('Filter by project name'),
         scope: z.enum(SCOPES).optional().describe('Filter by scope level'),
         status: z
-          .enum(['active', 'dormant', 'deprecated', 'needs_revalidation', 'all'])
+          .enum(['active', 'deprecated', 'needs_revalidation', 'all'])
           .optional()
           .describe('Filter by status (default: active + needs_revalidation)'),
         sort_by: z
@@ -37,8 +37,7 @@ export function registerListTool(server: McpServer): void {
           project,
           scope,
           status,
-          includeWeak: status === 'all' || status === 'dormant',
-          includeDormant: status === 'all' || status === 'dormant',
+          includeWeak: status === 'all',
         };
 
         const total = countKnowledge(filterParams);

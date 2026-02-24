@@ -3,7 +3,6 @@
 const STATUS_LABELS: Record<string, { label: string; cssClass: string }> = {
   active: { label: 'Active', cssClass: 'status-active' },
   needs_revalidation: { label: 'Pending', cssClass: 'status-needs_revalidation' },
-  dormant: { label: 'Dormant', cssClass: 'status-dormant' },
   deprecated: { label: 'Deprecated', cssClass: 'status-deprecated' },
 };
 

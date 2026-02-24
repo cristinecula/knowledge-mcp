@@ -203,7 +203,6 @@ export interface SearchParams {
   project?: string;
   scope?: Scope;
   includeWeak?: boolean;
-  includeDormant?: boolean;
   status?: string;
   sortBy?: 'strength' | 'recent' | 'created';
   limit?: number;
@@ -277,12 +276,9 @@ export function searchKnowledge(params: SearchParams): KnowledgeEntry[] {
       sql += ' AND k.status = ?';
       bindings.push(params.status);
     }
-  } else if (!params.includeDormant) {
-    // By default, exclude dormant entries
+  } else if (params.status !== 'all') {
+    // By default, show active + needs_revalidation entries
     const includeStatuses = ['active', 'needs_revalidation'];
-    if (params.includeWeak) {
-      // weak entries are active entries with low strength — no extra status filter needed
-    }
     sql += ` AND k.status IN (${includeStatuses.map(() => '?').join(',')})`;
     bindings.push(...includeStatuses);
 
@@ -369,7 +365,7 @@ export function countKnowledge(params: SearchParams): number {
       sql += ' AND k.status = ?';
       bindings.push(params.status);
     }
-  } else if (!params.includeDormant) {
+  } else if (params.status !== 'all') {
     const includeStatuses = ['active', 'needs_revalidation'];
     sql += ` AND k.status IN (${includeStatuses.map(() => '?').join(',')})`;
     bindings.push(...includeStatuses);

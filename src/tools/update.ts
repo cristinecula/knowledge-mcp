@@ -67,7 +67,7 @@ export function registerUpdateTool(server: McpServer): void {
           const incomingLinks = getIncomingLinks(id, REVALIDATION_LINK_TYPES);
           for (const link of incomingLinks) {
             const linkedEntry = getKnowledgeById(link.source_id);
-            if (linkedEntry && linkedEntry.status !== 'deprecated' && linkedEntry.status !== 'dormant') {
+            if (linkedEntry && linkedEntry.status !== 'deprecated') {
               updateStatus(link.source_id, 'needs_revalidation');
               revalidated.push(link.source_id);
             }

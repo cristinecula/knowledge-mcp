@@ -107,10 +107,10 @@ async function main(): Promise<void> {
   getDb(dbPath);
   console.error('Database initialized');
 
-  // Run maintenance sweep (recalculate strengths, transition dormant entries)
+  // Run maintenance sweep (recalculate strengths)
   const sweep = runMaintenanceSweep();
   console.error(
-    `Maintenance sweep: ${sweep.processed} entries processed, ${sweep.transitioned} transitioned to dormant`,
+    `Maintenance sweep: ${sweep.processed} entries processed`,
   );
 
   // Initialize sync (if configured)

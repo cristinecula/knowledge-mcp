@@ -262,7 +262,7 @@ describe('update + cascade revalidation workflow', () => {
     const revalidatedIds: string[] = [];
     for (const link of incomingLinks) {
       const dependentEntry = getKnowledgeById(link.source_id);
-      if (dependentEntry && dependentEntry.status !== 'deprecated' && dependentEntry.status !== 'dormant') {
+      if (dependentEntry && dependentEntry.status !== 'deprecated') {
         updateStatus(link.source_id, 'needs_revalidation');
         revalidatedIds.push(link.source_id);
       }
@@ -297,16 +297,13 @@ describe('update + cascade revalidation workflow', () => {
     expect(getKnowledgeById(related.id)!.status).toBe('active');
   });
 
-  it('should not flag deprecated or dormant entries', () => {
+  it('should not flag deprecated entries', () => {
     const base = insertKnowledge({ type: 'fact', title: 'Base', content: 'base' });
     const deprecated = insertKnowledge({ type: 'fact', title: 'Deprecated', content: 'dep' });
-    const dormant = insertKnowledge({ type: 'fact', title: 'Dormant', content: 'dorm' });
 
     insertLink({ sourceId: deprecated.id, targetId: base.id, linkType: 'derived' });
-    insertLink({ sourceId: dormant.id, targetId: base.id, linkType: 'depends' });
 
     updateStatus(deprecated.id, 'deprecated');
-    updateStatus(dormant.id, 'dormant');
 
     updateKnowledgeFields(base.id, { content: 'Updated' });
 
@@ -314,7 +311,7 @@ describe('update + cascade revalidation workflow', () => {
     const revalidatedIds: string[] = [];
     for (const link of incomingLinks) {
       const dependentEntry = getKnowledgeById(link.source_id);
-      if (dependentEntry && dependentEntry.status !== 'deprecated' && dependentEntry.status !== 'dormant') {
+      if (dependentEntry && dependentEntry.status !== 'deprecated') {
         updateStatus(link.source_id, 'needs_revalidation');
         revalidatedIds.push(link.source_id);
       }
@@ -560,7 +557,7 @@ describe('supersedes revalidation workflow', () => {
     insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
 
     const target = getKnowledgeById(old.id)!;
-    if (target.status !== 'deprecated' && target.status !== 'dormant') {
+    if (target.status !== 'deprecated') {
       updateStatus(old.id, 'needs_revalidation');
     }
 
@@ -586,7 +583,7 @@ describe('supersedes revalidation workflow', () => {
     insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
 
     const target = getKnowledgeById(old.id)!;
-    if (target.status !== 'deprecated' && target.status !== 'dormant') {
+    if (target.status !== 'deprecated') {
       updateStatus(old.id, 'needs_revalidation');
     }
 
@@ -610,7 +607,7 @@ describe('supersedes revalidation workflow', () => {
     insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
 
     const target = getKnowledgeById(old.id)!;
-    if (target.status !== 'deprecated' && target.status !== 'dormant') {
+    if (target.status !== 'deprecated') {
       updateStatus(old.id, 'needs_revalidation');
     }
 

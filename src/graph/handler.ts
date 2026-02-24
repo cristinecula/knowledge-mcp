@@ -126,7 +126,6 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         query,
         limit: limit * 2,
         includeWeak: true,
-        includeDormant: true,
         status: 'all',
       });
 
@@ -140,7 +139,6 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
           const candidates = searchKnowledge({
             limit: 200,
             includeWeak: true,
-            includeDormant: true,
             status: 'all',
           });
 
@@ -249,7 +247,6 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
         type: 'wiki',
         limit: 250,
         includeWeak: true,
-        includeDormant: true,
         status: 'all',
         sortBy: 'recent',
       });

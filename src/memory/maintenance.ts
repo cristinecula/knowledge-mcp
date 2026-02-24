@@ -2,25 +2,23 @@ import {
   getAllActiveEntries,
   getAllLinks,
   updateStrength,
-  updateStatus,
 } from '../db/queries.js';
 import { getDb } from '../db/connection.js';
 import {
-  STRENGTH_DORMANT_THRESHOLD,
   type KnowledgeEntry,
   type KnowledgeLink,
 } from '../types.js';
 import { calculateNetworkStrength } from './strength.js';
 
 /**
- * Run a maintenance sweep: recalculate strength for all active entries,
- * and transition entries below thresholds to appropriate statuses.
+ * Run a maintenance sweep: recalculate strength for all active entries.
  *
  * Should be called on server startup and periodically (e.g., every hour).
+ * Low-strength entries are naturally filtered out by the query layer
+ * (strength >= 0.5 threshold) without needing a status transition.
  */
 export function runMaintenanceSweep(): {
   processed: number;
-  transitioned: number;
 } {
   // Wiki entries are exempt from decay — they represent curated documentation
   // that should persist indefinitely without strength degradation.
@@ -42,10 +40,8 @@ export function runMaintenanceSweep(): {
     entryMap.set(entry.id, entry);
   }
 
-  let transitioned = 0;
-
   // Wrap all updates in a single transaction for performance.
-  // Without this, each updateStrength/updateStatus is its own implicit
+  // Without this, each updateStrength is its own implicit
   // transaction with journal overhead. Batching gives 10-100x speedup.
   const db = getDb();
   const applyUpdates = db.transaction(() => {
@@ -63,19 +59,11 @@ export function runMaintenanceSweep(): {
 
       const newStrength = calculateNetworkStrength(entry, links, linkedEntries);
 
-      // Update strength in DB
+      // Update strength in DB (low-strength entries are filtered by query layer)
       updateStrength(entry.id, newStrength);
-
-      // Transition status based on strength (but don't touch 'needs_revalidation' or 'deprecated')
-      if (entry.status === 'active') {
-        if (newStrength < STRENGTH_DORMANT_THRESHOLD) {
-          updateStatus(entry.id, 'dormant');
-          transitioned++;
-        }
-      }
     }
   });
   applyUpdates();
 
-  return { processed: entries.length, transitioned };
+  return { processed: entries.length };
 }

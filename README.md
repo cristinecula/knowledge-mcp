@@ -336,9 +336,8 @@ finalStrength = baseStrength + min(networkBonus, baseStrength * 0.5)
 **Link type weights:** depends (0.3), derived (0.2), elaborates (0.2), contradicts (0.15), supersedes (0.15), related (0.1).
 
 **Status transitions:**
-- `active` — strength >= 0.5
+- `active` — default status; entries with strength < 0.5 are filtered from queries automatically
 - `needs_revalidation` — flagged by cascade revalidation
-- `dormant` — strength < 0.1 (excluded from queries by default)
 - `deprecated` — manually deprecated, decays 10x faster
 
 ### Data Model
@@ -396,7 +395,7 @@ src/
     queries.ts          # All CRUD, search, link, embedding queries
   memory/
     strength.ts         # Base + network strength calculations
-    maintenance.ts      # Periodic sweep: recalculate strengths, transition dormant
+    maintenance.ts      # Periodic sweep: recalculate strengths
   tools/
     store.ts            # store_knowledge
     query.ts            # query_knowledge

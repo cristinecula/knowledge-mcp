@@ -23,7 +23,6 @@ export type Scope = (typeof SCOPES)[number];
 
 export const STATUSES = [
   'active',
-  'dormant',
   'deprecated',
   'needs_revalidation',
 ] as const;
@@ -126,7 +125,6 @@ export const DEPRECATED_DECAY_MULTIPLIER = 10;
 
 /** Strength thresholds */
 export const STRENGTH_ACTIVE_THRESHOLD = 0.5;
-export const STRENGTH_DORMANT_THRESHOLD = 0.1;
 
 /** Link type weights for network strength calculation */
 export const LINK_WEIGHTS: Record<LinkType, number> = {

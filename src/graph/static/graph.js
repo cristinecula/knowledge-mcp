@@ -32,7 +32,6 @@ const LINK_DASH = {
 const STATUS_OPACITY = {
   active: 1,
   needs_revalidation: 1,
-  dormant: 0.3,
   deprecated: 0.15,
 };
 

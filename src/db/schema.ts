@@ -185,6 +185,17 @@ function migrateSchema(db: Database.Database): void {
     `);
   }
 
+  // Migration 10: Remove dormant status — convert existing dormant entries back to active.
+  // The query layer already filters by strength >= 0.5, so dormant status is redundant.
+  // This prevents memory decay from leaking into the sync layer (dormant transitions
+  // bumped version numbers, causing spurious sync pushes that overwrote other users' status).
+  const hasDormant = db.prepare(
+    `SELECT 1 FROM knowledge WHERE status = 'dormant' LIMIT 1`,
+  ).get();
+  if (hasDormant) {
+    db.exec(`UPDATE knowledge SET status = 'active' WHERE status = 'dormant'`);
+  }
+
   // Backfill: ensure content_updated_at is set for any rows where it's empty.
   // Only run if there are actually rows to fix (avoids full-table scan on every startup).
   const needsBackfill = db.prepare(

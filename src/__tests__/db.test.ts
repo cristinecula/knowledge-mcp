@@ -321,9 +321,9 @@ describe('searchKnowledge (filters)', () => {
     expect(resultsWithWeak).toHaveLength(1);
   });
 
-  it('should exclude dormant entries by default', () => {
-    const entry = insertKnowledge({ type: 'fact', title: 'Dormant', content: 'test' });
-    updateStatus(entry.id, 'dormant');
+  it('should exclude deprecated entries by default', () => {
+    const entry = insertKnowledge({ type: 'fact', title: 'Deprecated', content: 'test' });
+    updateStatus(entry.id, 'deprecated');
 
     const results = searchKnowledge({ query: 'test' });
     expect(results).toHaveLength(0);
