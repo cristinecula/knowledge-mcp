@@ -2,7 +2,7 @@
  * Serialize/deserialize knowledge entries and links.
  *
  * Entries are stored as Markdown files with YAML frontmatter.
- * Links are stored as JSON files (small metadata-only records).
+ * Outgoing links are embedded in entry frontmatter under a `links:` key.
  *
  * Shared fields are included in files. Personal/local fields
  * (access_count, last_accessed_at, synced_at, embeddings)
@@ -16,6 +16,7 @@
  */
 
 import matter from 'gray-matter';
+import { createHash } from 'node:crypto';
 import {
   KNOWLEDGE_TYPES,
   SCOPES,
@@ -36,6 +37,13 @@ const VALID_SCOPES = new Set<string>(SCOPES);
 const VALID_STATUSES = new Set<string>(STATUSES);
 const VALID_LINK_TYPES = new Set<string>(LINK_TYPES);
 
+/** A link as stored in entry YAML frontmatter (outgoing links only). */
+export interface FrontmatterLink {
+  target: string;       // UUID of the target entry
+  type: string;         // LinkType (e.g., 'related', 'depends')
+  description?: string; // Why the link exists
+}
+
 /** Shape of an entry as stored in a JSON file (shared fields only). */
 export interface EntryJSON {
   id: string;
@@ -54,6 +62,7 @@ export interface EntryJSON {
   inaccuracy?: number;
   created_at: string;
   version: number;
+  links?: FrontmatterLink[];
 }
 
 /** Shape of a link as stored in a JSON file. */
@@ -243,6 +252,27 @@ export function parseEntryJSON(data: unknown): EntryJSON {
     result.inaccuracy = inaccuracy;
   }
 
+  // Parse links if present (array of { target, type, description? })
+  if (Array.isArray(obj.links)) {
+    const links: FrontmatterLink[] = [];
+    for (const item of obj.links) {
+      if (typeof item !== 'object' || item === null) continue;
+      const linkObj = item as Record<string, unknown>;
+      // target must be a valid UUID
+      if (typeof linkObj.target !== 'string' || !UUID_RE.test(linkObj.target)) continue;
+      // type must be a valid link type
+      if (typeof linkObj.type !== 'string' || !VALID_LINK_TYPES.has(linkObj.type)) continue;
+      const link: FrontmatterLink = { target: linkObj.target, type: linkObj.type };
+      if (typeof linkObj.description === 'string' && linkObj.description.length > 0) {
+        link.description = linkObj.description;
+      }
+      links.push(link);
+    }
+    if (links.length > 0) {
+      result.links = links;
+    }
+  }
+
   return result;
 }
 
@@ -307,8 +337,22 @@ export function parseLinkJSON(data: unknown): LinkJSON {
 }
 
 // ---------------------------------------------------------------------------
-// Markdown with YAML frontmatter — entry serialization (schema v2)
+// Markdown with YAML frontmatter — entry serialization (schema v2+)
 // ---------------------------------------------------------------------------
+
+/**
+ * Generate a deterministic link ID from (source_id, target_id, type).
+ *
+ * Links no longer have their own IDs in the sync repo (they're embedded in
+ * entry frontmatter). On import, we need a stable ID so the same link always
+ * gets the same UUID across machines, preventing duplicates.
+ *
+ * Uses SHA-256 of the concatenated fields, formatted as a UUID-like string.
+ */
+export function deterministicLinkId(sourceId: string, targetId: string, type: string): string {
+  const hash = createHash('sha256').update(`${sourceId}:${targetId}:${type}`).digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
 
 /**
  * Convert a title to a URL-friendly slug.
@@ -373,6 +417,15 @@ export function entryToMarkdown(entry: EntryJSON): string {
   if (entry.declaration) fm.declaration = entry.declaration;
   if (entry.parent_page_id) fm.parent_page_id = entry.parent_page_id;
   if (entry.inaccuracy && entry.inaccuracy > 0) fm.inaccuracy = entry.inaccuracy;
+
+  // Include outgoing links in frontmatter (only when non-empty)
+  if (entry.links && entry.links.length > 0) {
+    fm.links = entry.links.map((link) => {
+      const l: Record<string, string> = { target: link.target, type: link.type };
+      if (link.description) l.description = link.description;
+      return l;
+    });
+  }
 
   return matter.stringify(entry.content + '\n', fm);
 }

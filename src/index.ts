@@ -18,7 +18,6 @@ import { registerGetTool } from './tools/get.js';
 import { registerListTool } from './tools/list.js';
 import { registerReinforceTool } from './tools/reinforce.js';
 import { registerDeprecateTool } from './tools/deprecate.js';
-import { registerLinkTool } from './tools/link.js';
 import { registerUpdateTool } from './tools/update.js';
 import { registerDeleteTool } from './tools/delete.js';
 import { registerSyncTool } from './tools/sync.js';
@@ -244,13 +243,12 @@ async function main(): Promise<void> {
   registerListTool(server);
   registerReinforceTool(server);
   registerDeprecateTool(server);
-  registerLinkTool(server);
   registerUpdateTool(server);
   registerDeleteTool(server);
   registerSyncTool(server);
   registerHistoryTools(server);
 
-  const toolCount = isSyncEnabled() ? '12 tools registered (sync enabled)' : '12 tools registered (sync disabled)';
+  const toolCount = isSyncEnabled() ? '11 tools registered (sync enabled)' : '11 tools registered (sync disabled)';
   console.error(toolCount);
 
   // Start graph visualization server

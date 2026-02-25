@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { updateKnowledgeFields, getKnowledgeById, getOutgoingLinks, getLinksForEntry, updateKnowledgeContent, resetInaccuracy, computeDiffFactor, propagateInaccuracy } from '../db/queries.js';
-import { syncWriteEntry, scheduleCommit } from '../sync/index.js';
-import { KNOWLEDGE_TYPES, SCOPES, INACCURACY_THRESHOLD } from '../types.js';
+import { updateKnowledgeFields, getKnowledgeById, getOutgoingLinks, getLinksForEntry, updateKnowledgeContent, resetInaccuracy, computeDiffFactor, propagateInaccuracy, insertLink, deleteLink } from '../db/queries.js';
+import { syncWriteEntry, syncWriteEntryWithLinks, scheduleCommit } from '../sync/index.js';
+import { KNOWLEDGE_TYPES, SCOPES, LINK_TYPES, INACCURACY_THRESHOLD } from '../types.js';
+import type { LinkType } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
 
 export function registerUpdateTool(server: McpServer): void {
@@ -30,9 +31,22 @@ export function registerUpdateTool(server: McpServer): void {
           .enum(SCOPES)
           .optional()
           .describe('Updated scope level: company, project, repo'),
+        links: z
+          .array(
+            z.object({
+              target_id: z.string().uuid(),
+              link_type: z.enum(LINK_TYPES.filter((t) => t !== 'conflicts_with') as [string, ...string[]]),
+              description: z.string().optional(),
+            }),
+          )
+          .optional()
+          .describe(
+            'Declarative outgoing links (replaces all existing non-conflict links). ' +
+            'Omit to keep links unchanged. Set to [] to remove all links.',
+          ),
       },
     },
-    async ({ id, title, content, tags, type, project, scope }) => {
+    async ({ id, title, content, tags, type, project, scope, links }) => {
       try {
         const oldEntry = getKnowledgeById(id);
         if (!oldEntry) {
@@ -65,7 +79,66 @@ export function registerUpdateTool(server: McpServer): void {
           }
 
           syncWriteEntry(updated, oldEntry.type, oldEntry.scope, oldEntry.project);
-          
+
+          // Handle declarative links (set-based: replaces all non-conflict outgoing links)
+          let linksAdded = 0;
+          let linksRemoved = 0;
+          if (links !== undefined) {
+            // Get current outgoing links (excluding conflict-related ones)
+            const currentOutgoing = getOutgoingLinks(id).filter(
+              (l) => l.link_type !== 'conflicts_with' && l.source !== 'sync:conflict',
+            );
+
+            // Build a map of desired links: key = "target_id:link_type"
+            const desiredMap = new Map<string, { target_id: string; link_type: string; description?: string }>();
+            for (const link of links) {
+              const key = `${link.target_id}:${link.link_type}`;
+              desiredMap.set(key, link);
+            }
+
+            // Build a map of current links: key = "target_id:link_type"
+            const currentMap = new Map<string, string>(); // key -> link.id
+            for (const link of currentOutgoing) {
+              const key = `${link.target_id}:${link.link_type}`;
+              currentMap.set(key, link.id);
+            }
+
+            // Delete links that are no longer desired
+            for (const [key, linkId] of currentMap) {
+              if (!desiredMap.has(key)) {
+                deleteLink(linkId);
+                linksRemoved++;
+              }
+            }
+
+            // Insert links that don't exist yet
+            for (const [key, link] of desiredMap) {
+              if (!currentMap.has(key)) {
+                try {
+                  insertLink({
+                    sourceId: id,
+                    targetId: link.target_id,
+                    linkType: link.link_type as LinkType,
+                    description: link.description,
+                    source: updated.source || 'agent',
+                  });
+                  linksAdded++;
+                } catch {
+                  // Skip duplicates or FK violations
+                }
+              }
+            }
+
+            // If links changed, rewrite the entry file with updated frontmatter
+            if (linksAdded > 0 || linksRemoved > 0) {
+              // Re-fetch the entry to get latest state
+              const refreshed = getKnowledgeById(id);
+              if (refreshed) {
+                syncWriteEntryWithLinks(refreshed);
+              }
+            }
+          }
+
           // Schedule a debounced git commit
           scheduleCommit(`knowledge: update ${updated.type} "${updated.title}"`);
 
@@ -91,6 +164,10 @@ export function registerUpdateTool(server: McpServer): void {
           }
 
           let responseText = `Updated knowledge entry: ${updated.title} (ID: ${id})`;
+
+          if (linksAdded > 0 || linksRemoved > 0) {
+            responseText += `\nLinks: ${linksAdded} added, ${linksRemoved} removed`;
+          }
 
           if (bumps.length > 0) {
             const aboveThreshold = bumps.filter((b) => b.newInaccuracy >= INACCURACY_THRESHOLD);
@@ -123,7 +200,7 @@ export function registerUpdateTool(server: McpServer): void {
               responseText +=
                 '\n\nWARNING: This wiki entry has no links to source knowledge entries. ' +
                 'Wiki pages should reference the knowledge entries they are derived from. ' +
-                'Use link_knowledge to create links (e.g., "derived", "elaborates", or "related") ' +
+                'Use update_knowledge with the links parameter to add links (e.g., "derived", "elaborates", or "related") ' +
                 'from this wiki entry to the relevant source entries.';
             }
           }
@@ -139,13 +216,13 @@ export function registerUpdateTool(server: McpServer): void {
                   `\n\nSYNC CONFLICT: This entry is a sync conflict copy. ` +
                   `The canonical version is ${cl.target_id}. ` +
                   `If you are resolving the conflict, update the canonical entry instead, ` +
-                  `then delete this conflict copy with delete_knowledge and remove the conflicts_with link.`;
+                  `then delete this conflict copy with delete_knowledge.`;
               } else {
                 responseText +=
                   `\n\nSYNC CONFLICT: This entry has an unresolved sync conflict. ` +
                   `A conflict copy with local changes exists at ${cl.source_id}. ` +
                   `If the local changes in the conflict copy should be preserved, merge them into this entry. ` +
-                  `Then delete the conflict copy with delete_knowledge and remove the conflicts_with link.`;
+                  `Then delete the conflict copy with delete_knowledge.`;
               }
             }
           }

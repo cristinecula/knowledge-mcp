@@ -9,23 +9,21 @@
 import { existsSync } from 'node:fs';
 import {
   getAllEntries,
-  getAllLinks,
-  updateSyncedVersion,
+  getOutgoingLinks,
   updateLinkSyncedAt,
+  updateSyncedVersion,
 } from '../db/queries.js';
 import { getDb } from '../db/connection.js';
-import { entryToJSON, entryToMarkdown, linkToJSON, id8 } from './serialize.js';
+import { entryToJSON, entryToMarkdown, id8 } from './serialize.js';
+import type { FrontmatterLink } from './serialize.js';
 import {
   ensureRepoStructure,
   writeEntryFile,
   readEntryFileRaw,
-  writeLinkFile,
-  readLinkFileRaw,
   deleteEntryFile,
-  deleteLinkFile,
   getRepoEntryIds,
-  getRepoLinkIds,
   cleanupRedirectFiles,
+  cleanupLinksDirectory,
 } from './fs.js';
 import { resolveRepoForScope } from './routing.js';
 import { gitCommitAll, gitPush } from './git.js';
@@ -34,8 +32,6 @@ export interface PushResult {
   new_entries: number;
   updated: number;
   deleted: number;
-  new_links: number;
-  deleted_links: number;
 }
 
 /**
@@ -46,8 +42,6 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
     new_entries: 0,
     updated: 0,
     deleted: 0,
-    new_links: 0,
-    deleted_links: 0,
   };
 
   const touchedRepos = new Set<string>();
@@ -86,6 +80,20 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
       // This prevents spurious git commits when the entry hasn't actually changed
       // (e.g., after a pull→push cycle where only local metadata like access_count changed).
       const json = entryToJSON(entry);
+
+      // Embed outgoing links in the entry's frontmatter
+      const outgoing = getOutgoingLinks(entry.id);
+      const fmLinks: FrontmatterLink[] = [];
+      for (const link of outgoing) {
+        // Skip conflict-related links — they're local-only
+        if (link.source === 'sync:conflict') continue;
+        if (link.link_type === 'conflicts_with') continue;
+        const fmLink: FrontmatterLink = { target: link.target_id, type: link.link_type };
+        if (link.description) fmLink.description = link.description;
+        fmLinks.push(fmLink);
+      }
+      if (fmLinks.length > 0) json.links = fmLinks;
+
       const serialized = entryToMarkdown(json);
       const existing = readEntryFileRaw(repoPath, entry.type, entry.id, entry.title);
 
@@ -104,6 +112,13 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
         } else {
           result.updated++;
         }
+      }
+
+      // Mark outgoing links as synced (they were embedded in the entry's frontmatter)
+      for (const link of outgoing) {
+        if (link.source === 'sync:conflict') continue;
+        if (link.link_type === 'conflicts_with') continue;
+        updateLinkSyncedAt(link.id);
       }
     }
   });
@@ -144,71 +159,10 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
     if (cleaned > 0) {
       touchedRepos.add(repo.path);
     }
-  }
 
-  // === Push links ===
-
-  const localLinks = getAllLinks();
-  const localLinkIds = new Set<string>();
-  const linkRepoMap = new Map<string, string>();
-
-  // Batch link processing in a transaction for performance.
-  const processLinks = db.transaction(() => {
-    for (const link of localLinks) {
-      // Skip conflict-related links (never synced to repo)
-      if (link.source === 'sync:conflict') continue;
-      if (link.link_type === 'conflicts_with') continue;
-
-      localLinkIds.add(link.id);
-
-      // Resolve repo based on source entry's repo
-      const sourceRepo = entryRepoMap.get(link.source_id);
-      
-      if (sourceRepo) {
-        const json = linkToJSON(link);
-        const serialized = JSON.stringify(json, null, 2) + '\n';
-        const existing = readLinkFileRaw(sourceRepo, link.id);
-
-        if (existing === serialized) {
-          // File is byte-identical — skip write
-          updateLinkSyncedAt(link.id);
-        } else {
-          writeLinkFile(sourceRepo, json);
-          linkRepoMap.set(link.id, sourceRepo);
-          touchedRepos.add(sourceRepo);
-
-          // Count as new or updated
-          if (existing === null) {
-            result.new_links++;
-          }
-
-          // Mark link as synced
-          updateLinkSyncedAt(link.id);
-        }
-      }
-    }
-  });
-  processLinks();
-
-  // === Clean up old link files ===
-
-  for (const repo of config.repos) {
-    if (!existsSync(repo.path)) continue;
-
-    const repoLinkIds = getRepoLinkIds(repo.path);
-    for (const id of repoLinkIds) {
-      if (!localLinkIds.has(id)) {
-        deleteLinkFile(repo.path, id);
-        result.deleted_links++;
-        touchedRepos.add(repo.path);
-        continue;
-      }
-
-      const correctRepo = linkRepoMap.get(id);
-      if (correctRepo && correctRepo !== repo.path) {
-        deleteLinkFile(repo.path, id);
-        touchedRepos.add(repo.path);
-      }
+    // Clean up old links/ directory (migrated to frontmatter in schema v3)
+    if (cleanupLinksDirectory(repo.path)) {
+      touchedRepos.add(repo.path);
     }
   }
 

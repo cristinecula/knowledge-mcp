@@ -3,8 +3,9 @@
  *
  * Reads and writes entry files organized as:
  *   entries/{type}/{slug}_{id8}.md    (markdown with YAML frontmatter)
- *   links/{id}.json                   (JSON)
  *   meta.json
+ *
+ * Links are embedded in entry frontmatter (no separate link files).
  *
  * When an entry's title changes, the file is renamed (new slug). The old
  * file is overwritten with a redirect marker so git sees a "modify" instead
@@ -15,7 +16,7 @@
  * attacks via crafted IDs or types in repo files.
  */
 
-import { readFileSync, writeFileSync, unlinkSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, readdirSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { KNOWLEDGE_TYPES } from '../types.js';
 import type { KnowledgeType } from '../types.js';
@@ -67,12 +68,6 @@ export function ensureRepoStructure(repoPath: string): void {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-  }
-
-  // Create links directory
-  const linksDir = resolve(repoPath, 'links');
-  if (!existsSync(linksDir)) {
-    mkdirSync(linksDir, { recursive: true });
   }
 
   // Create or update meta.json
@@ -133,17 +128,6 @@ export function findEntryFile(repoPath: string, type: KnowledgeType, id: string)
 }
 
 // ---------------------------------------------------------------------------
-// Link file paths (JSON, unchanged)
-// ---------------------------------------------------------------------------
-
-/** Get the file path for a link JSON file. Validates path stays within repo. */
-export function linkFilePath(repoPath: string, id: string): string {
-  const filePath = resolve(repoPath, 'links', `${id}.json`);
-  assertWithinRoot(filePath, repoPath);
-  return filePath;
-}
-
-// ---------------------------------------------------------------------------
 // Write operations
 // ---------------------------------------------------------------------------
 
@@ -169,12 +153,6 @@ export function writeEntryFile(repoPath: string, entry: EntryJSON): void {
   writeFileSync(newPath, markdown);
 }
 
-/** Write a link JSON file. */
-export function writeLinkFile(repoPath: string, link: LinkJSON): void {
-  const filePath = linkFilePath(repoPath, link.id);
-  writeFileSync(filePath, JSON.stringify(link, null, 2) + '\n');
-}
-
 // ---------------------------------------------------------------------------
 // Read operations
 // ---------------------------------------------------------------------------
@@ -198,13 +176,6 @@ export function readEntryFileRaw(repoPath: string, type: KnowledgeType, id: stri
   // Fall back to directory scan
   const filePath = findEntryFile(repoPath, type, id);
   if (!filePath) return null;
-  return readFileSync(filePath, 'utf-8');
-}
-
-/** Read a link JSON file and return its raw string content (for comparison). Returns null if the file doesn't exist. */
-export function readLinkFileRaw(repoPath: string, id: string): string | null {
-  const filePath = linkFilePath(repoPath, id);
-  if (!existsSync(filePath)) return null;
   return readFileSync(filePath, 'utf-8');
 }
 
@@ -238,12 +209,6 @@ export function deleteEntryFile(repoPath: string, id: string, type?: KnowledgeTy
 
     if (type) return; // Only searched the specified type
   }
-}
-
-/** Delete a link JSON file. */
-export function deleteLinkFile(repoPath: string, id: string): void {
-  const filePath = linkFilePath(repoPath, id);
-  if (existsSync(filePath)) unlinkSync(filePath);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,21 +333,6 @@ export function getRepoEntryIds(repoPath: string): Set<string> {
   return ids;
 }
 
-/** Get all link IDs present in the repo. */
-export function getRepoLinkIds(repoPath: string): Set<string> {
-  const ids = new Set<string>();
-  const linksDir = resolve(repoPath, 'links');
-
-  if (!existsSync(linksDir)) return ids;
-
-  const files = readdirSync(linksDir).filter((f) => f.endsWith('.json'));
-  for (const file of files) {
-    ids.add(file.replace('.json', ''));
-  }
-
-  return ids;
-}
-
 // ---------------------------------------------------------------------------
 // Redirect cleanup
 // ---------------------------------------------------------------------------
@@ -467,6 +417,107 @@ export function migrateJsonToMarkdown(repoPath: string): number {
       }
     }
   }
+
+  return migrated;
+}
+
+// ---------------------------------------------------------------------------
+// Migration: Link JSON files → entry frontmatter (schema v2 → v3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove the `links/` directory from a sync repo if it exists.
+ * Called during push to clean up after migrating links into entry frontmatter.
+ */
+export function cleanupLinksDirectory(repoPath: string): boolean {
+  const linksDir = resolve(repoPath, 'links');
+  if (!existsSync(linksDir)) return false;
+
+  rmSync(linksDir, { recursive: true, force: true });
+  return true;
+}
+
+/**
+ * Migrate link JSON files into entry Markdown frontmatter.
+ *
+ * Reads all `links/{id}.json` files, groups by source_id, reads each
+ * source entry's `.md` file, adds links to frontmatter, rewrites the
+ * file, then deletes the `links/` directory.
+ *
+ * Called on server startup alongside the JSON→MD migration.
+ * Idempotent — skips if no `links/` directory exists.
+ *
+ * Returns the number of links migrated.
+ */
+export function migrateLinkFilesToFrontmatter(repoPath: string): number {
+  const linksDir = resolve(repoPath, 'links');
+  if (!existsSync(linksDir)) return 0;
+
+  // Read all link files
+  const linkFiles = readdirSync(linksDir).filter((f) => f.endsWith('.json'));
+  if (linkFiles.length === 0) {
+    // No link files — just clean up the empty directory
+    cleanupLinksDirectory(repoPath);
+    return 0;
+  }
+
+  // Group links by source_id
+  const linksBySource = new Map<string, Array<{ target: string; type: string; description?: string }>>();
+  for (const file of linkFiles) {
+    try {
+      const filePath = join(linksDir, file);
+      assertWithinRoot(filePath, repoPath);
+      const content = readFileSync(filePath, 'utf-8');
+      const data = JSON.parse(content);
+      const link = parseLinkJSON(data);
+
+      const existing = linksBySource.get(link.source_id) || [];
+      const fmLink: { target: string; type: string; description?: string } = {
+        target: link.target_id,
+        type: link.link_type,
+      };
+      if (link.description) fmLink.description = link.description;
+      existing.push(fmLink);
+      linksBySource.set(link.source_id, existing);
+    } catch (error) {
+      console.error(`Warning: Failed to parse link file ${file} during migration: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // For each source entry, read its .md file, add links to frontmatter, rewrite
+  let migrated = 0;
+  for (const [sourceId, links] of linksBySource) {
+    try {
+      // Find the entry file — we don't know the type, so search all type dirs
+      let entryPath: string | null = null;
+      let entry: EntryJSON | null = null;
+
+      for (const type of KNOWLEDGE_TYPES) {
+        const found = findEntryFile(repoPath, type, sourceId);
+        if (found) {
+          entryPath = found;
+          const content = readFileSync(found, 'utf-8');
+          entry = parseEntryMarkdown(content);
+          break;
+        }
+      }
+
+      if (!entryPath || !entry) {
+        console.error(`Warning: Source entry ${sourceId} not found during link migration, skipping ${links.length} links`);
+        continue;
+      }
+
+      // Add links to entry and rewrite
+      entry.links = links;
+      writeFileSync(entryPath, entryToMarkdown(entry));
+      migrated += links.length;
+    } catch (error) {
+      console.error(`Warning: Failed to migrate links for entry ${sourceId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Clean up links directory
+  cleanupLinksDirectory(repoPath);
 
   return migrated;
 }

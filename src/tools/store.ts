@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { insertKnowledge, insertLink } from '../db/queries.js';
-import { syncWriteEntry, syncWriteLink, scheduleCommit } from '../sync/index.js';
+import { syncWriteEntry, syncWriteEntryWithLinks, scheduleCommit } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, LINK_TYPES, SCOPES } from '../types.js';
+import type { LinkType } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
 
 export function registerStoreTool(server: McpServer): void {
@@ -32,7 +33,7 @@ export function registerStoreTool(server: McpServer): void {
           .array(
             z.object({
               target_id: z.string().uuid(),
-              link_type: z.enum(LINK_TYPES),
+              link_type: z.enum(LINK_TYPES.filter((t) => t !== 'conflicts_with') as [string, ...string[]]),
               description: z.string().optional(),
             }),
           )
@@ -60,15 +61,16 @@ export function registerStoreTool(server: McpServer): void {
 
         if (links && links.length > 0) {
           for (const link of links) {
-            const newLink = insertLink({
+            insertLink({
               sourceId: entry.id,
               targetId: link.target_id,
-              linkType: link.link_type,
+              linkType: link.link_type as LinkType,
               description: link.description,
               source: source || 'agent',
             });
-            syncWriteLink(newLink, entry);
           }
+          // Rewrite entry file with links in frontmatter
+          syncWriteEntryWithLinks(entry);
         }
 
         // Schedule a debounced git commit

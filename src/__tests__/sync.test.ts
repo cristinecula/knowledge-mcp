@@ -29,18 +29,16 @@ import {
   ensureRepoStructure,
   writeEntryFile,
   readEntryFileRaw,
-  writeLinkFile,
   push,
   pull,
   detectConflict,
   setSyncConfig,
   syncWriteEntry,
-  syncWriteLink,
+  syncWriteEntryWithLinks,
   syncDeleteEntry,
-  syncDeleteLink,
   touchedRepos,
   clearTouchedRepos,
-  getRepoLinkIds,
+  deterministicLinkId,
   tryAcquireSyncLock,
   releaseSyncLock,
 } from '../sync/index.js';
@@ -159,7 +157,6 @@ describe('sync layer', () => {
       ensureRepoStructure(repoPath);
       expect(existsSync(join(repoPath, 'entries', 'fact'))).toBe(true);
       expect(existsSync(join(repoPath, 'entries', 'decision'))).toBe(true);
-      expect(existsSync(join(repoPath, 'links'))).toBe(true);
       expect(existsSync(join(repoPath, 'meta.json'))).toBe(true);
     });
 
@@ -565,11 +562,11 @@ describe('sync layer', () => {
     });
   });
 
-  describe('link write-through', () => {
-    it('should write link to repo on save', () => {
+  describe('link write-through (frontmatter)', () => {
+    it('should embed links in source entry frontmatter on save', () => {
       const e1 = insertKnowledge({ title: 'Source', type: 'fact', content: 'S' });
       const e2 = insertKnowledge({ title: 'Target', type: 'fact', content: 'T' });
-      const link = insertLink({
+      insertLink({
         sourceId: e1.id,
         targetId: e2.id,
         linkType: 'related',
@@ -577,19 +574,22 @@ describe('sync layer', () => {
         source: 'user',
       });
 
-      syncWriteLink(link, e1);
+      syncWriteEntryWithLinks(e1);
 
-      expect(existsSync(join(repoPath, 'links', `${link.id}.json`))).toBe(true);
       expect(touchedRepos.has(repoPath)).toBe(true);
 
-      // Verify contents
-      const raw = JSON.parse(readFileSync(join(repoPath, 'links', `${link.id}.json`), 'utf-8'));
-      expect(raw.source_id).toBe(e1.id);
-      expect(raw.target_id).toBe(e2.id);
-      expect(raw.link_type).toBe('related');
+      // Verify link appears in the entry's frontmatter
+      const filePath = join(repoPath, 'entries', 'fact', entryFileName('Source', e1.id));
+      expect(existsSync(filePath)).toBe(true);
+      const parsed = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
+      expect(parsed.links).toBeDefined();
+      expect(parsed.links).toHaveLength(1);
+      expect(parsed.links![0].target).toBe(e2.id);
+      expect(parsed.links![0].type).toBe('related');
+      expect(parsed.links![0].description).toBe('test link');
     });
 
-    it('should route link to source entry repo in multi-repo config', () => {
+    it('should route entry with links to correct repo in multi-repo config', () => {
       const multiConfig: SyncConfig = {
         repos: [
           { name: 'company', path: repoPath, scope: 'company' },
@@ -600,7 +600,7 @@ describe('sync layer', () => {
 
       const e1 = insertKnowledge({ title: 'Source', type: 'fact', content: 'S', scope: 'project' });
       const e2 = insertKnowledge({ title: 'Target', type: 'fact', content: 'T', scope: 'company' });
-      const link = insertLink({
+      insertLink({
         sourceId: e1.id,
         targetId: e2.id,
         linkType: 'related',
@@ -608,11 +608,14 @@ describe('sync layer', () => {
         source: 'user',
       });
 
-      // Link should go to source entry's repo (project = repoPath2)
-      syncWriteLink(link, e1);
+      // Entry with links should go to source entry's repo (project = repoPath2)
+      syncWriteEntryWithLinks(e1);
 
-      expect(existsSync(join(repoPath2, 'links', `${link.id}.json`))).toBe(true);
-      expect(existsSync(join(repoPath, 'links', `${link.id}.json`))).toBe(false);
+      const filePath = join(repoPath2, 'entries', 'fact', entryFileName('Source', e1.id));
+      expect(existsSync(filePath)).toBe(true);
+      const parsed = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
+      expect(parsed.links).toBeDefined();
+      expect(parsed.links![0].target).toBe(e2.id);
     });
   });
 
@@ -658,59 +661,6 @@ describe('sync layer', () => {
       // Should be deleted from project repo
       expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Project Entry', entry.id)))).toBe(false);
       expect(touchedRepos.has(repoPath2)).toBe(true);
-    });
-  });
-
-  describe('syncDeleteLink', () => {
-    it('should delete link file from repo', () => {
-      const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
-      const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
-      const link = insertLink({
-        sourceId: e1.id,
-        targetId: e2.id,
-        linkType: 'related',
-        source: 'user',
-      });
-
-      syncWriteLink(link, e1);
-      expect(existsSync(join(repoPath, 'links', `${link.id}.json`))).toBe(true);
-
-      clearTouchedRepos();
-      syncDeleteLink(link.id);
-
-      expect(existsSync(join(repoPath, 'links', `${link.id}.json`))).toBe(false);
-      expect(touchedRepos.has(repoPath)).toBe(true);
-    });
-
-    it('should search all repos for the link', () => {
-      const multiConfig: SyncConfig = {
-        repos: [
-          { name: 'r1', path: repoPath },
-          { name: 'r2', path: repoPath2 },
-        ],
-      };
-      setSyncConfig(multiConfig);
-
-      // Create link in repo2
-      const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '', scope: 'company' });
-      const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
-      const link = insertLink({
-        sourceId: e1.id,
-        targetId: e2.id,
-        linkType: 'related',
-        source: 'user',
-      });
-
-      // Manually write link to repo2
-      ensureRepoStructure(repoPath2);
-      writeLinkFile(repoPath2, linkToJSON(link));
-      expect(existsSync(join(repoPath2, 'links', `${link.id}.json`))).toBe(true);
-
-      clearTouchedRepos();
-      syncDeleteLink(link.id);
-
-      // Should find and delete from repo2
-      expect(existsSync(join(repoPath2, 'links', `${link.id}.json`))).toBe(false);
     });
   });
 
@@ -819,51 +769,64 @@ describe('sync layer', () => {
     });
   });
 
-  describe('pull with links', () => {
-    it('should import links from repo', async () => {
+  describe('pull with links (frontmatter)', () => {
+    it('should import links from entry frontmatter', async () => {
       // Create entries first (links need both endpoints)
       const e1 = insertKnowledge({ title: 'E1', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'E2', type: 'fact', content: '' });
       syncWriteEntry(e1);
       syncWriteEntry(e2);
 
-      // Simulate remote link by writing directly to repo
-      const linkId = '00000000-0000-4000-a000-000000000020';
-      writeLinkFile(repoPath, {
-        id: linkId,
-        source_id: e1.id,
-        target_id: e2.id,
-        link_type: 'related',
-        description: 'remote link',
+      // Simulate remote entry with links by writing entry file with frontmatter links
+      ensureRepoStructure(repoPath);
+      const e1JSON: EntryJSON = {
+        id: e1.id,
+        type: 'fact',
+        title: 'E1',
+        content: '',
+        tags: [],
+        project: null,
+        scope: 'company',
         source: 'remote-agent',
+        status: 'active',
         created_at: new Date().toISOString(),
-      });
+        version: 2,
+        links: [{ target: e2.id, type: 'related', description: 'remote link' }],
+      };
+      writeEntryFile(repoPath, e1JSON);
 
       const result = await pull(config);
       expect(result.new_links).toBe(1);
 
       const links = getAllLinks();
-      const imported = links.find((l) => l.id === linkId);
+      // The link should have a deterministic ID
+      const expectedId = deterministicLinkId(e1.id, e2.id, 'related');
+      const imported = links.find((l) => l.id === expectedId);
       expect(imported).toBeTruthy();
       expect(imported!.link_type).toBe('related');
-      expect(imported!.source).toBe('remote-agent');
       expect(imported!.synced_at).toBeTruthy();
     });
 
-    it('should skip links where source/target missing locally', async () => {
-      const missingSourceId = '00000000-0000-4000-a000-000000000030';
+    it('should skip links where target missing locally', async () => {
       const missingTargetId = '00000000-0000-4000-a000-000000000031';
+      const e1Id = '00000000-0000-4000-a000-000000000030';
 
       ensureRepoStructure(repoPath);
-      writeLinkFile(repoPath, {
-        id: '00000000-0000-4000-a000-000000000032',
-        source_id: missingSourceId,
-        target_id: missingTargetId,
-        link_type: 'related',
-        description: 'orphan link',
+      const e1JSON: EntryJSON = {
+        id: e1Id,
+        type: 'fact',
+        title: 'Orphan Source',
+        content: '',
+        tags: [],
+        project: null,
+        scope: 'company',
         source: 'remote',
+        status: 'active',
         created_at: new Date().toISOString(),
-      });
+        version: 1,
+        links: [{ target: missingTargetId, type: 'related', description: 'orphan link' }],
+      };
+      writeEntryFile(repoPath, e1JSON);
 
       const result = await pull(config);
       expect(result.new_links).toBe(0);
@@ -874,36 +837,47 @@ describe('sync layer', () => {
       const e1 = insertKnowledge({ title: 'E1', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'E2', type: 'fact', content: '' });
 
-      const link = insertLink({
+      insertLink({
         sourceId: e1.id,
         targetId: e2.id,
         linkType: 'related',
         source: 'user',
       });
 
-      // Push to sync everything — this sets synced_at on links
+      // Push to sync everything — this sets synced_at on links and embeds them in frontmatter
       await push(config);
 
       // Verify link exists locally and has synced_at set
       let links = getAllLinks();
-      const syncedLink = links.find((l) => l.id === link.id);
+      const syncedLink = links.find((l) => l.source_id === e1.id && l.target_id === e2.id);
       expect(syncedLink).toBeTruthy();
       expect(syncedLink!.synced_at).toBeTruthy();
 
-      // Remove link file from repo (simulate remote deletion)
-      const linkPath = join(repoPath, 'links', `${link.id}.json`);
-      if (existsSync(linkPath)) {
-        const { unlinkSync } = await import('node:fs');
-        unlinkSync(linkPath);
-      }
+      // Rewrite e1's entry file WITHOUT links (simulate remote deletion of the link)
+      const e1JSON: EntryJSON = {
+        id: e1.id,
+        type: 'fact',
+        title: 'E1',
+        content: '',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'unknown',
+        status: 'active',
+        created_at: e1.created_at,
+        version: e1.version,
+        // No links — link was deleted remotely
+      };
+      writeEntryFile(repoPath, e1JSON);
 
       // Pull again — should detect deletion because link has synced_at
       const result = await pull(config);
       expect(result.deleted_links).toBe(1);
 
       links = getAllLinks();
-      expect(links.find((l) => l.id === link.id)).toBeUndefined();
+      expect(links.find((l) => l.source_id === e1.id && l.target_id === e2.id && l.link_type === 'related')).toBeUndefined();
     });
+
     it('should preserve locally-created links that have not been pushed', async () => {
       // Create entries and push them to establish sync baseline
       const e1 = insertKnowledge({ title: 'E1', type: 'fact', content: '' });
@@ -934,8 +908,8 @@ describe('sync layer', () => {
     });
   });
 
-  describe('push with links', () => {
-    it('should export links to repo', async () => {
+  describe('push with links (frontmatter)', () => {
+    it('should embed links in entry frontmatter during push', async () => {
       const e1 = insertKnowledge({ title: 'A', type: 'fact', content: '' });
       const e2 = insertKnowledge({ title: 'B', type: 'fact', content: '' });
       insertLink({
@@ -947,11 +921,20 @@ describe('sync layer', () => {
       });
 
       const result = await push(config);
-      expect(result.new_links).toBe(1);
+      expect(result.new_entries).toBe(2);
 
-      // Verify link file exists
-      const linkIds = getRepoLinkIds(repoPath);
-      expect(linkIds.size).toBe(1);
+      // Verify link is embedded in source entry's frontmatter
+      const filePath = join(repoPath, 'entries', 'fact', entryFileName('A', e1.id));
+      const parsed = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
+      expect(parsed.links).toBeDefined();
+      expect(parsed.links).toHaveLength(1);
+      expect(parsed.links![0].target).toBe(e2.id);
+      expect(parsed.links![0].type).toBe('related');
+
+      // Target entry should NOT have the link in its frontmatter (only outgoing)
+      const targetPath = join(repoPath, 'entries', 'fact', entryFileName('B', e2.id));
+      const targetParsed = parseEntryMarkdown(readFileSync(targetPath, 'utf-8'));
+      expect(targetParsed.links).toBeUndefined();
     });
 
     it('should set synced_at on links after push', async () => {
@@ -985,17 +968,19 @@ describe('sync layer', () => {
         source: 'user',
       });
 
-      // First push — creates the link file
+      // First push — entry should have link in frontmatter
       await push(config);
-      expect(getRepoLinkIds(repoPath).has(link.id)).toBe(true);
+      const filePath = join(repoPath, 'entries', 'fact', entryFileName('A', e1.id));
+      let parsed = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
+      expect(parsed.links).toHaveLength(1);
 
       // Delete the link locally
       deleteLink(link.id);
 
-      // Second push — should remove the link file
-      const result = await push(config);
-      expect(result.deleted_links).toBe(1);
-      expect(getRepoLinkIds(repoPath).has(link.id)).toBe(false);
+      // Second push — entry should no longer have link in frontmatter
+      await push(config);
+      parsed = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
+      expect(parsed.links).toBeUndefined();
     });
 
     it('should not push conflict-related links (sync:conflict source)', async () => {
@@ -1011,9 +996,12 @@ describe('sync layer', () => {
         source: 'sync:conflict',
       });
 
-      const result = await push(config);
-      // Should push entries but not the conflict link
-      expect(result.new_links).toBe(0);
+      await push(config);
+
+      // Entry should NOT have the conflict link in frontmatter
+      const filePath = join(repoPath, 'entries', 'fact', entryFileName('A', e1.id));
+      const parsed = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
+      expect(parsed.links).toBeUndefined();
     });
 
     it('should not push conflicts_with links', async () => {
@@ -1029,9 +1017,12 @@ describe('sync layer', () => {
         source: 'sync:conflict',
       });
 
-      const result = await push(config);
-      // Should push entries but not the conflicts_with link
-      expect(result.new_links).toBe(0);
+      await push(config);
+
+      // Entry should NOT have the conflicts_with link in frontmatter
+      const filePath = join(repoPath, 'entries', 'fact', entryFileName('A2', e1.id));
+      const parsed = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
+      expect(parsed.links).toBeUndefined();
     });
 
     it('should not push [Sync Conflict] entries', async () => {

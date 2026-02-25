@@ -529,7 +529,7 @@ describe('supersedes revalidation workflow', () => {
       content: 'We now use Pion Contexts instead of Preact Signals',
     });
 
-    // Simulate link_knowledge tool: create supersedes link and flag target
+    // Simulate update_knowledge tool with links: create supersedes link and flag target
     insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
 
     const target = getKnowledgeById(old.id)!;

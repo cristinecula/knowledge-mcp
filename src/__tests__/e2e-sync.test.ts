@@ -1002,11 +1002,13 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
         const e1 = await storeEntry(agentA, { title: 'Source entry', content: 'source' });
         const e2 = await storeEntry(agentA, { title: 'Target entry', content: 'target' });
 
-        await callTool(agentA, 'link_knowledge', {
-          source_id: e1.id,
-          target_id: e2.id,
-          link_type: 'related',
-          description: 'E2E link test',
+        await callTool(agentA, 'update_knowledge', {
+          id: e1.id,
+          links: [{
+            target_id: e2.id,
+            link_type: 'related',
+            description: 'E2E link test',
+          }],
         });
 
         // Push everything
@@ -1049,11 +1051,13 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
 
         // Agent B pulls, then creates a link
         await syncAgent(agentB, 'pull');
-        await callTool(agentB, 'link_knowledge', {
-          source_id: e1.id,
-          target_id: e2.id,
-          link_type: 'derived',
-          description: 'Bob link',
+        await callTool(agentB, 'update_knowledge', {
+          id: e1.id,
+          links: [{
+            target_id: e2.id,
+            link_type: 'derived',
+            description: 'Bob link',
+          }],
         });
         await syncAgent(agentB, 'push');
 
@@ -1086,10 +1090,12 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
         // Create entries + link
         const e1 = await storeEntry(agentA, { title: 'Link Del Source', content: 'src' });
         const e2 = await storeEntry(agentA, { title: 'Link Del Target', content: 'tgt' });
-        await callTool(agentA, 'link_knowledge', {
-          source_id: e1.id,
-          target_id: e2.id,
-          link_type: 'related',
+        await callTool(agentA, 'update_knowledge', {
+          id: e1.id,
+          links: [{
+            target_id: e2.id,
+            link_type: 'related',
+          }],
         }) as string;
 
         await syncAgent(agentA, 'push');
@@ -1154,10 +1160,12 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
       try {
         const e1 = await storeEntry(agentA, { title: 'Boot Link Source', content: 's' });
         const e2 = await storeEntry(agentA, { title: 'Boot Link Target', content: 't' });
-        await callTool(agentA, 'link_knowledge', {
-          source_id: e1.id,
-          target_id: e2.id,
-          link_type: 'elaborates',
+        await callTool(agentA, 'update_knowledge', {
+          id: e1.id,
+          links: [{
+            target_id: e2.id,
+            link_type: 'elaborates',
+          }],
         });
         await syncAgent(agentA, 'push');
 
