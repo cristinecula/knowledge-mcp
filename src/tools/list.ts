@@ -103,6 +103,7 @@ export function registerListTool(server: McpServer): void {
             last_accessed_at: entry.last_accessed_at,
             needs_revalidation: entry.inaccuracy >= INACCURACY_THRESHOLD,
             inaccuracy: Math.round(entry.inaccuracy * 1000) / 1000,
+            link_count: links.length,
           };
           if (entry.declaration) {
             result.declaration = entry.declaration;
