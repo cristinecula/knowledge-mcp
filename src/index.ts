@@ -18,7 +18,6 @@ import { registerGetTool } from './tools/get.js';
 import { registerListTool } from './tools/list.js';
 import { registerReinforceTool } from './tools/reinforce.js';
 import { registerDeprecateTool } from './tools/deprecate.js';
-import { registerLinkTool } from './tools/link.js';
 import { registerUpdateTool } from './tools/update.js';
 import { registerDeleteTool } from './tools/delete.js';
 import { registerSyncTool } from './tools/sync.js';
@@ -36,9 +35,11 @@ import {
   flushCommit,
   loadSyncConfig,
   ensureRepoStructure,
+  migrateJsonToMarkdown,
   gitInit,
   gitPull,
   gitClone,
+  gitCommitAll,
   hasRemote,
   gitAddRemote,
 } from './sync/index.js';
@@ -172,6 +173,13 @@ async function main(): Promise<void> {
 
       // 4. Ensure structure
       ensureRepoStructure(repo.path);
+
+      // 5. Migrate old JSON entry files to Markdown (schema v1 → v2)
+      const migrated = migrateJsonToMarkdown(repo.path);
+      if (migrated > 0) {
+        console.error(`Migrated ${migrated} entry files from JSON to Markdown in ${repo.name}`);
+        gitCommitAll(repo.path, 'knowledge: migrate entries from JSON to Markdown');
+      }
     }
 
     // Pull import
@@ -235,13 +243,12 @@ async function main(): Promise<void> {
   registerListTool(server);
   registerReinforceTool(server);
   registerDeprecateTool(server);
-  registerLinkTool(server);
   registerUpdateTool(server);
   registerDeleteTool(server);
   registerSyncTool(server);
   registerHistoryTools(server);
 
-  const toolCount = isSyncEnabled() ? '12 tools registered (sync enabled)' : '12 tools registered (sync disabled)';
+  const toolCount = isSyncEnabled() ? '11 tools registered (sync enabled)' : '11 tools registered (sync disabled)';
   console.error(toolCount);
 
   // Start graph visualization server

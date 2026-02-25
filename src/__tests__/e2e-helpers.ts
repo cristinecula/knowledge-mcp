@@ -14,6 +14,8 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'node:
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { entryFileName, entryToMarkdown, type EntryJSON, type FrontmatterLink } from '../sync/serialize.js';
+import { SYNC_SCHEMA_VERSION } from '../sync/config.js';
 
 const SERVER_PATH = resolve(import.meta.dirname, '../../build/index.js');
 
@@ -354,45 +356,43 @@ export function seedRemote(
       const dir = join(tmpDir, 'entries', t);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     }
-    const linksDir = join(tmpDir, 'links');
-    if (!existsSync(linksDir)) mkdirSync(linksDir, { recursive: true });
 
     // Write meta.json
-    writeFileSync(join(tmpDir, 'meta.json'), JSON.stringify({ schema_version: 1 }, null, 2) + '\n');
+    writeFileSync(join(tmpDir, 'meta.json'), JSON.stringify({ schema_version: SYNC_SCHEMA_VERSION }, null, 2) + '\n');
 
-    // Write entries
+    // Build a map of source_id -> FrontmatterLink[] for embedding links in entries
+    const linksBySource = new Map<string, FrontmatterLink[]>();
+    if (links) {
+      for (const l of links) {
+        const fmLink: FrontmatterLink = { target: l.target_id, type: l.link_type };
+        if (l.description) fmLink.description = l.description;
+        const existing = linksBySource.get(l.source_id) ?? [];
+        existing.push(fmLink);
+        linksBySource.set(l.source_id, existing);
+      }
+    }
+
+    // Write entries (with embedded links if any)
     const now = new Date().toISOString();
     for (const e of entries) {
-      const json = {
+      const json: EntryJSON = {
         id: e.id,
-        type: e.type,
+        type: e.type as EntryJSON['type'],
         title: e.title,
         content: e.content,
         tags: e.tags ?? [],
         project: e.project ?? null,
-        scope: e.scope ?? 'company',
+        scope: (e.scope ?? 'company') as EntryJSON['scope'],
         source: 'seed',
-        status: 'active',
+        status: 'active' as const,
         created_at: now,
         version: 1,
       };
-      writeFileSync(join(tmpDir, 'entries', e.type, `${e.id}.json`), JSON.stringify(json, null, 2) + '\n');
-    }
-
-    // Write links
-    if (links) {
-      for (const l of links) {
-        const json = {
-          id: l.id,
-          source_id: l.source_id,
-          target_id: l.target_id,
-          link_type: l.link_type,
-          description: l.description ?? null,
-          source: 'seed',
-          created_at: now,
-        };
-        writeFileSync(join(tmpDir, 'links', `${l.id}.json`), JSON.stringify(json, null, 2) + '\n');
+      const entryLinks = linksBySource.get(e.id);
+      if (entryLinks && entryLinks.length > 0) {
+        json.links = entryLinks;
       }
+      writeFileSync(join(tmpDir, 'entries', e.type, entryFileName(e.title, e.id)), entryToMarkdown(json));
     }
 
     execFileSync('git', ['add', '-A'], { cwd: tmpDir, stdio: 'pipe' });
@@ -404,7 +404,7 @@ export function seedRemote(
 }
 
 /**
- * Write a malformed JSON file directly into a bare remote.
+ * Write a malformed file directly into a bare remote.
  */
 export function seedMalformedFile(
   remotePath: string,

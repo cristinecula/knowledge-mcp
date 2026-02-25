@@ -1,16 +1,22 @@
 /**
- * Serialize/deserialize knowledge entries and links to/from JSON.
+ * Serialize/deserialize knowledge entries and links.
  *
- * Shared fields are included in JSON files. Personal/local fields
+ * Entries are stored as Markdown files with YAML frontmatter.
+ * Outgoing links are embedded in entry frontmatter under a `links:` key.
+ *
+ * Shared fields are included in files. Personal/local fields
  * (access_count, last_accessed_at, synced_at, embeddings)
  * are stripped on export and not expected on import.
  *
- * SECURITY: parseEntryJSON and parseLinkJSON validate all fields from
- * untrusted repo JSON files — IDs must be valid UUIDs, types/scopes/statuses
- * must be from the allowed set, and tags must be an array of strings.
- * This prevents path traversal via crafted IDs and invalid data injection.
+ * SECURITY: parseEntryJSON, parseEntryMarkdown, and parseLinkJSON validate
+ * all fields from untrusted repo files — IDs must be valid UUIDs,
+ * types/scopes/statuses must be from the allowed set, and tags must be
+ * an array of strings. This prevents path traversal via crafted IDs and
+ * invalid data injection.
  */
 
+import matter from 'gray-matter';
+import { createHash } from 'node:crypto';
 import {
   KNOWLEDGE_TYPES,
   SCOPES,
@@ -31,6 +37,13 @@ const VALID_SCOPES = new Set<string>(SCOPES);
 const VALID_STATUSES = new Set<string>(STATUSES);
 const VALID_LINK_TYPES = new Set<string>(LINK_TYPES);
 
+/** A link as stored in entry YAML frontmatter (outgoing links only). */
+export interface FrontmatterLink {
+  target: string;       // UUID of the target entry
+  type: string;         // LinkType (e.g., 'related', 'depends')
+  description?: string; // Why the link exists
+}
+
 /** Shape of an entry as stored in a JSON file (shared fields only). */
 export interface EntryJSON {
   id: string;
@@ -49,6 +62,7 @@ export interface EntryJSON {
   inaccuracy?: number;
   created_at: string;
   version: number;
+  links?: FrontmatterLink[];
 }
 
 /** Shape of a link as stored in a JSON file. */
@@ -238,6 +252,27 @@ export function parseEntryJSON(data: unknown): EntryJSON {
     result.inaccuracy = inaccuracy;
   }
 
+  // Parse links if present (array of { target, type, description? })
+  if (Array.isArray(obj.links)) {
+    const links: FrontmatterLink[] = [];
+    for (const item of obj.links) {
+      if (typeof item !== 'object' || item === null) continue;
+      const linkObj = item as Record<string, unknown>;
+      // target must be a valid UUID
+      if (typeof linkObj.target !== 'string' || !UUID_RE.test(linkObj.target)) continue;
+      // type must be a valid link type
+      if (typeof linkObj.type !== 'string' || !VALID_LINK_TYPES.has(linkObj.type)) continue;
+      const link: FrontmatterLink = { target: linkObj.target, type: linkObj.type };
+      if (typeof linkObj.description === 'string' && linkObj.description.length > 0) {
+        link.description = linkObj.description;
+      }
+      links.push(link);
+    }
+    if (links.length > 0) {
+      result.links = links;
+    }
+  }
+
   return result;
 }
 
@@ -299,4 +334,146 @@ export function parseLinkJSON(data: unknown): LinkJSON {
     source: typeof obj.source === 'string' ? obj.source : 'unknown',
     created_at: obj.created_at,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Markdown with YAML frontmatter — entry serialization (schema v2+)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a deterministic link ID from (source_id, target_id, type).
+ *
+ * Links no longer have their own IDs in the sync repo (they're embedded in
+ * entry frontmatter). On import, we need a stable ID so the same link always
+ * gets the same UUID across machines, preventing duplicates.
+ *
+ * Uses SHA-256 of the concatenated fields, formatted as a UUID-like string.
+ */
+export function deterministicLinkId(sourceId: string, targetId: string, type: string): string {
+  const hash = createHash('sha256').update(`${sourceId}:${targetId}:${type}`).digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+
+/**
+ * Convert a title to a URL-friendly slug.
+ * Lowercase, non-alphanumeric chars replaced with hyphens, max 60 chars.
+ *
+ * Examples:
+ *   "Use React Query for Server State" → "use-react-query-for-server-state"
+ *   "[Sync Conflict] My Entry" → "sync-conflict-my-entry"
+ *   "  Lots   of---spaces  " → "lots-of-spaces"
+ */
+export function titleToSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')   // Replace non-alphanumeric runs with single hyphen
+    .replace(/^-+|-+$/g, '')        // Trim leading/trailing hyphens
+    .slice(0, 60)                   // Truncate to 60 chars
+    .replace(/-+$/, '');            // Trim trailing hyphen if truncation split a word
+}
+
+/**
+ * Get the first 8 characters of a UUID (the prefix before the first hyphen).
+ * Used as a short ID suffix in filenames.
+ */
+export function id8(id: string): string {
+  return id.slice(0, 8);
+}
+
+/**
+ * Build the filename for an entry: {slug}_{id8}.md
+ */
+export function entryFileName(title: string, id: string): string {
+  const slug = titleToSlug(title);
+  return `${slug}_${id8(id)}.md`;
+}
+
+/** Regex to extract the 8-char ID suffix from an entry filename. */
+export const ENTRY_FILENAME_RE = /_([0-9a-f]{8})\.md$/i;
+
+/**
+ * Convert an EntryJSON to a Markdown file with YAML frontmatter.
+ *
+ * Frontmatter contains all metadata fields (everything except content).
+ * The body is the content field verbatim.
+ */
+export function entryToMarkdown(entry: EntryJSON): string {
+  // Build frontmatter data — only include optional fields when set
+  const fm: Record<string, unknown> = {
+    id: entry.id,
+    type: entry.type,
+    title: entry.title,
+    tags: entry.tags,
+    project: entry.project,
+    scope: entry.scope,
+    source: entry.source,
+    status: entry.status,
+    created_at: entry.created_at,
+    version: entry.version,
+  };
+
+  if (entry.deprecation_reason) fm.deprecation_reason = entry.deprecation_reason;
+  if (entry.flag_reason) fm.flag_reason = entry.flag_reason;
+  if (entry.declaration) fm.declaration = entry.declaration;
+  if (entry.parent_page_id) fm.parent_page_id = entry.parent_page_id;
+  if (entry.inaccuracy && entry.inaccuracy > 0) fm.inaccuracy = entry.inaccuracy;
+
+  // Include outgoing links in frontmatter (only when non-empty)
+  if (entry.links && entry.links.length > 0) {
+    fm.links = entry.links.map((link) => {
+      const l: Record<string, string> = { target: link.target, type: link.type };
+      if (link.description) l.description = link.description;
+      return l;
+    });
+  }
+
+  return matter.stringify(entry.content + '\n', fm);
+}
+
+/**
+ * Build a redirect marker file content. Written to the old path when an entry
+ * is renamed (title change causes slug change). The redirect points to the
+ * new filename so other machines can follow it during merge.
+ */
+export function buildRedirectMarker(newFileName: string): string {
+  return matter.stringify('', { redirect: newFileName });
+}
+
+/**
+ * Check if a raw file string is a redirect marker.
+ * Returns the target filename if it is, null otherwise.
+ */
+export function parseRedirect(raw: string): string | null {
+  try {
+    const { data } = matter(raw);
+    if (typeof data.redirect === 'string' && data.redirect.length > 0) {
+      return data.redirect;
+    }
+  } catch {
+    // Not valid frontmatter — not a redirect
+  }
+  return null;
+}
+
+/**
+ * Parse a Markdown file with YAML frontmatter into an EntryJSON.
+ *
+ * Validates all fields strictly — this data comes from repo files
+ * which may be authored by untrusted parties (shared git repos).
+ *
+ * Throws if the file is a redirect marker (has a `redirect` field).
+ */
+export function parseEntryMarkdown(raw: string): EntryJSON {
+  const { data, content } = matter(raw);
+
+  // Check for redirect marker
+  if (data.redirect) {
+    throw new Error(`File is a redirect marker pointing to "${data.redirect}"`);
+  }
+
+  // Reuse the same validation logic as parseEntryJSON by delegating to it.
+  // The frontmatter `data` object has the same shape as EntryJSON minus content.
+  // We inject the body as `content`.
+  const obj = { ...data, content: content.trim() };
+  return parseEntryJSON(obj);
 }

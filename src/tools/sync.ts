@@ -88,8 +88,6 @@ export function registerSyncTool(server: McpServer): void {
               new: pushResult.new_entries,
               updated: pushResult.updated,
               deleted: pushResult.deleted,
-              new_links: pushResult.new_links,
-              deleted_links: pushResult.deleted_links,
             };
           }
 

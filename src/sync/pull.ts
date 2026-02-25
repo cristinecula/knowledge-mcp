@@ -18,7 +18,7 @@ import { existsSync } from 'node:fs';
 import {
   getKnowledgeById,
   getAllEntries,
-  getAllLinks,
+  getOutgoingLinks,
   importKnowledge,
   importLink,
   updateKnowledgeContent,
@@ -33,10 +33,10 @@ import { embedAndStore } from '../embeddings/similarity.js';
 import { detectConflict } from './merge.js';
 import {
   readAllEntryFiles,
-  readAllLinkFiles,
   ensureRepoStructure,
 } from './fs.js';
 import { gitPull } from './git.js';
+import { deterministicLinkId } from './serialize.js';
 import type { EntryJSON } from './serialize.js';
 import type { KnowledgeType, LinkType, Scope, Status } from '../types.js';
 import { INACCURACY_THRESHOLD } from '../types.js';
@@ -74,9 +74,7 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
 
   // 1. Git pull + read all entries from all repos
   const remoteEntries = new Map<string, EntryJSON>();
-  const remoteLinks = new Map<string, import('./serialize.js').LinkJSON>();
   const repoEntryIds = new Set<string>();
-  const repoLinkIds = new Set<string>();
 
   for (const repo of config.repos) {
     if (!existsSync(repo.path)) continue;
@@ -86,22 +84,13 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
 
     ensureRepoStructure(repo.path);
 
-    // Read entries
+    // Read entries (links are embedded in entry frontmatter)
     const entries = readAllEntryFiles(repo.path);
     for (const entry of entries) {
       // First repo wins for duplicates (based on config order)
       if (!remoteEntries.has(entry.id)) {
         remoteEntries.set(entry.id, entry);
         repoEntryIds.add(entry.id);
-      }
-    }
-
-    // Read links
-    const links = readAllLinkFiles(repo.path);
-    for (const link of links) {
-      if (!remoteLinks.has(link.id)) {
-        remoteLinks.set(link.id, link);
-        repoLinkIds.add(link.id);
       }
     }
   }
@@ -273,49 +262,68 @@ export async function pull(config: import('./routing.js').SyncConfig): Promise<P
     }
   }
 
-  // 4. Process links (new)
-  for (const remote of remoteLinks.values()) {
-    // Check both referenced entries exist locally
-    const sourceExists = getKnowledgeById(remote.source_id);
-    const targetExists = getKnowledgeById(remote.target_id);
+  // 4. Import links from entry frontmatter
+  //
+  // Each remote entry may have a `links` array in its frontmatter (outgoing links).
+  // We import these using deterministic IDs so the same link always gets the same
+  // UUID across machines, preventing duplicates.
+  //
+  // We also track which link IDs should exist (from remote entries) so we can
+  // clean up orphaned links in step 5.
+  const remoteLinkIds = new Set<string>();
 
-    if (!sourceExists || !targetExists) {
-      // Skip links where either end is missing locally
-      continue;
-    }
+  for (const remote of remoteEntries.values()) {
+    if (!remote.links || remote.links.length === 0) continue;
 
-    try {
-      const imported = importLink({
-        id: remote.id,
-        sourceId: remote.source_id,
-        targetId: remote.target_id,
-        linkType: remote.link_type as LinkType,
-        description: remote.description ?? undefined,
-        source: remote.source,
-        created_at: remote.created_at,
-      });
-      if (imported) {
-        result.new_links++;
+    for (const fmLink of remote.links) {
+      const linkId = deterministicLinkId(remote.id, fmLink.target, fmLink.type);
+      remoteLinkIds.add(linkId);
+
+      // Check target entry exists locally
+      const targetExists = getKnowledgeById(fmLink.target);
+      if (!targetExists) continue;
+
+      try {
+        const imported = importLink({
+          id: linkId,
+          sourceId: remote.id,
+          targetId: fmLink.target,
+          linkType: fmLink.type as LinkType,
+          description: fmLink.description,
+          source: remote.source,
+          created_at: remote.created_at,
+        });
+        if (imported) {
+          result.new_links++;
+        }
+      } catch {
+        // Skip links that can't be imported (e.g., duplicate or FK issue)
       }
-    } catch {
-      // Skip links that can't be imported (e.g., duplicate or FK issue)
     }
   }
 
-  // 5. Detect remote link deletions
-  // Only delete links that have been synced before (synced_at is set).
-  // Links created locally (synced_at IS NULL) are preserved -- they haven't
-  // been pushed yet, so their absence from the repo doesn't mean they were
-  // deleted remotely.
-  const localLinks = getAllLinks();
-
-  for (const local of localLinks) {
-    if (local.synced_at && !repoLinkIds.has(local.id)) {
-      // Don't delete conflict-related links
+  // 5. Clean up orphaned links
+  //
+  // For each synced entry that exists in the remote, check its local outgoing
+  // links. If a link was previously synced (synced_at is set) but its
+  // deterministic ID is no longer in the remote set, it was deleted remotely.
+  // Don't touch conflict-related links (local-only) or un-synced links.
+  for (const remote of remoteEntries.values()) {
+    const localOutgoing = getOutgoingLinks(remote.id);
+    for (const local of localOutgoing) {
+      // Don't touch conflict-related links
       if (local.source === 'sync:conflict') continue;
+      if (local.link_type === 'conflicts_with') continue;
 
-      deleteLink(local.id);
-      result.deleted_links++;
+      // Only clean up links that have been synced before
+      if (!local.synced_at) continue;
+
+      // If the deterministic ID for this link isn't in the remote set, delete it
+      const expectedId = deterministicLinkId(local.source_id, local.target_id, local.link_type);
+      if (!remoteLinkIds.has(expectedId) && !remoteLinkIds.has(local.id)) {
+        deleteLink(local.id);
+        result.deleted_links++;
+      }
     }
   }
 

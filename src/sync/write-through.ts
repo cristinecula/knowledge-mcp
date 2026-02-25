@@ -8,16 +8,16 @@
  */
 
 import { getSyncConfig, isSyncEnabled } from './config.js';
-import { entryToJSON, linkToJSON } from './serialize.js';
+import { entryToJSON } from './serialize.js';
+import type { FrontmatterLink } from './serialize.js';
 import {
   writeEntryFile,
-  writeLinkFile,
   deleteEntryFile,
-  deleteLinkFile,
   ensureRepoStructure,
 } from './fs.js';
+import { getOutgoingLinks } from '../db/queries.js';
 import { resolveRepoForScope } from './routing.js';
-import type { KnowledgeEntry, KnowledgeLink, KnowledgeType, Scope } from '../types.js';
+import type { KnowledgeEntry, KnowledgeType, Scope } from '../types.js';
 
 /**
  * Track which repos have pending changes that need a git commit.
@@ -33,7 +33,28 @@ export function clearTouchedRepos(): void {
 }
 
 /**
+ * Build FrontmatterLink[] from the entry's current outgoing links in the DB.
+ * Filters out conflict-related links (sync:conflict source, conflicts_with type).
+ */
+function getEntryFrontmatterLinks(entryId: string): FrontmatterLink[] | undefined {
+  const outgoing = getOutgoingLinks(entryId);
+  const links: FrontmatterLink[] = [];
+  for (const link of outgoing) {
+    // Skip conflict-related links — they're local-only
+    if (link.source === 'sync:conflict') continue;
+    if (link.link_type === 'conflicts_with') continue;
+
+    const fmLink: FrontmatterLink = { target: link.target_id, type: link.link_type };
+    if (link.description) fmLink.description = link.description;
+    links.push(fmLink);
+  }
+  return links.length > 0 ? links : undefined;
+}
+
+/**
  * Write-through an entry to the sync repo after a local write.
+ * Includes outgoing links in the entry's frontmatter.
+ *
  * Handles:
  * 1. Type changes (delete old file if needed)
  * 2. Scope/Project changes (move to new repo if needed)
@@ -70,13 +91,14 @@ export function syncWriteEntry(
       deleteEntryFile(repoPath, entry.id, oldType);
     }
 
-    // 4. Write new JSON file
+    // 4. Write entry file with links in frontmatter
     // NOTE: Do NOT call updateSyncedAt here. synced_at tracks when the entry
     // was last reconciled with the remote (import or push). Write-through puts
     // the file on disk but it hasn't been pushed yet. Updating synced_at here
     // would cause detectConflict to miss local changes (content_updated_at
     // would equal synced_at, so localChanged would be false).
     const json = entryToJSON(entry);
+    json.links = getEntryFrontmatterLinks(entry.id);
     writeEntryFile(repoPath, json);
     touchedRepos.add(repoPath);
 
@@ -86,26 +108,14 @@ export function syncWriteEntry(
 }
 
 /**
- * Write-through a link to the sync repo after a local write.
- * Links are stored in the same repo as their source entry.
+ * Write-through an entry with its links after a link mutation.
+ *
+ * Called after insertLink/deleteLink — rewrites the source entry's .md file
+ * with the current set of outgoing links in the frontmatter.
  */
-export function syncWriteLink(link: KnowledgeLink, sourceEntry: KnowledgeEntry): void {
-  if (!isSyncEnabled()) return;
-
-  const config = getSyncConfig()!;
-  
-  // Resolve repo based on source entry's scope/project
-  const targetRepo = resolveRepoForScope(sourceEntry.scope, sourceEntry.project, config);
-  const repoPath = targetRepo.path;
-
-  try {
-    ensureRepoStructure(repoPath);
-    const json = linkToJSON(link);
-    writeLinkFile(repoPath, json);
-    touchedRepos.add(repoPath);
-  } catch (error) {
-    console.error(`Warning: sync write-through failed for link ${link.id}: ${error instanceof Error ? error.message : String(error)}`);
-  }
+export function syncWriteEntryWithLinks(sourceEntry: KnowledgeEntry): void {
+  // Delegate to syncWriteEntry which now always includes links
+  syncWriteEntry(sourceEntry);
 }
 
 /**
@@ -126,25 +136,6 @@ export function syncDeleteEntry(id: string, type?: KnowledgeType): void {
       touchedRepos.add(repo.path);
     } catch {
       // Ignore errors (e.g., file not found in this repo)
-    }
-  }
-}
-
-/**
- * Delete a link file from the sync repo after a local delete.
- * Search all configured repos.
- */
-export function syncDeleteLink(id: string): void {
-  if (!isSyncEnabled()) return;
-
-  const config = getSyncConfig()!;
-
-  for (const repo of config.repos) {
-    try {
-      deleteLinkFile(repo.path, id);
-      touchedRepos.add(repo.path);
-    } catch {
-      // Ignore errors
     }
   }
 }

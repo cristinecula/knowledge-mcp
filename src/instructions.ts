@@ -6,7 +6,7 @@ You have access to a shared knowledge base via MCP tools:
 - **Search:** \`query_knowledge\` (text search, returns truncated content), \`list_knowledge\` (browse/filter, metadata only)
 - **Read:** \`get_knowledge\` (retrieve full content of an entry by ID)
 - **Write:** \`store_knowledge\`, \`update_knowledge\`, \`delete_knowledge\`
-- **Maintain:** \`reinforce_knowledge\`, \`deprecate_knowledge\`, \`link_knowledge\`
+- **Maintain:** \`reinforce_knowledge\`, \`deprecate_knowledge\`
 - **Sync:** \`sync_knowledge\` (git sync is recommended for team use and persistent history)
 - **History:** \`get_entry_history\`, \`get_entry_at_version\` (requires git sync)
 
@@ -86,7 +86,8 @@ inaccuracy automatically propagates to dependent entries through the knowledge g
   exhaustive reference. If it says "detailed guide", be thorough. The declaration is the page owner's
   intent for what the content should look like.
 - When creating or updating wiki entries, you **must** link them to the source knowledge entries
-  they are derived from using \`link_knowledge\` (e.g., \`derived\`, \`elaborates\`, or \`related\` link types).
+  they are derived from using the \`links\` parameter on \`store_knowledge\` or \`update_knowledge\`
+  (e.g., \`derived\`, \`elaborates\`, or \`related\` link types).
 - The \`update_knowledge\` tool will warn you if a wiki entry has no outgoing links to non-wiki entries.
   Always resolve these warnings before considering the task complete.
 - Entries may have a **flag_reason** — a human-provided note explaining why the page was flagged as

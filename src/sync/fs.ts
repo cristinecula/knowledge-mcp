@@ -1,21 +1,38 @@
 /**
  * File system operations for the sync repo.
  *
- * Reads and writes JSON files organized as:
- *   entries/{type}/{id}.json
- *   links/{id}.json
+ * Reads and writes entry files organized as:
+ *   entries/{type}/{slug}_{id8}.md    (markdown with YAML frontmatter)
  *   meta.json
+ *
+ * Links are embedded in entry frontmatter (no separate link files).
+ *
+ * When an entry's title changes, the file is renamed (new slug). The old
+ * file is overwritten with a redirect marker so git sees a "modify" instead
+ * of a "delete", preventing delete-modify merge conflicts.
  *
  * SECURITY: All file path construction validates that the resolved path
  * stays within the repo root directory. This prevents path traversal
- * attacks via crafted IDs or types in repo JSON files.
+ * attacks via crafted IDs or types in repo files.
  */
 
-import { readFileSync, writeFileSync, unlinkSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, readdirSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { KNOWLEDGE_TYPES } from '../types.js';
 import type { KnowledgeType } from '../types.js';
-import { type EntryJSON, type LinkJSON, parseEntryJSON, parseLinkJSON } from './serialize.js';
+import {
+  type EntryJSON,
+  type LinkJSON,
+  parseEntryJSON,
+  parseEntryMarkdown,
+  parseLinkJSON,
+  entryFileName,
+  entryToMarkdown,
+  buildRedirectMarker,
+  parseRedirect,
+  id8,
+  ENTRY_FILENAME_RE,
+} from './serialize.js';
 import { SYNC_SCHEMA_VERSION } from './config.js';
 
 /**
@@ -53,111 +70,200 @@ export function ensureRepoStructure(repoPath: string): void {
     }
   }
 
-  // Create links directory
-  const linksDir = resolve(repoPath, 'links');
-  if (!existsSync(linksDir)) {
-    mkdirSync(linksDir, { recursive: true });
-  }
-
-  // Create meta.json if it doesn't exist
+  // Create or update meta.json
   const metaPath = resolve(repoPath, 'meta.json');
+  const metaContent = JSON.stringify({ schema_version: SYNC_SCHEMA_VERSION }, null, 2) + '\n';
   if (!existsSync(metaPath)) {
-    writeFileSync(metaPath, JSON.stringify({ schema_version: SYNC_SCHEMA_VERSION }, null, 2) + '\n');
+    writeFileSync(metaPath, metaContent);
+  } else {
+    try {
+      const existing = JSON.parse(readFileSync(metaPath, 'utf-8'));
+      if (existing.schema_version !== SYNC_SCHEMA_VERSION) {
+        writeFileSync(metaPath, metaContent);
+      }
+    } catch {
+      writeFileSync(metaPath, metaContent);
+    }
   }
 
   verifiedRepos.add(repoPath);
 }
 
-/** Get the file path for an entry JSON file. Validates path stays within repo. */
-export function entryFilePath(repoPath: string, type: KnowledgeType, id: string): string {
-  const filePath = resolve(repoPath, 'entries', type, `${id}.json`);
+// ---------------------------------------------------------------------------
+// Entry file paths (slug-based .md files)
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the deterministic file path for an entry. Requires the title to compute
+ * the slug. Validates path stays within repo.
+ */
+export function entryFilePath(repoPath: string, type: KnowledgeType, id: string, title: string): string {
+  const fileName = entryFileName(title, id);
+  const filePath = resolve(repoPath, 'entries', type, fileName);
   assertWithinRoot(filePath, repoPath);
   return filePath;
 }
 
-/** Get the file path for a link JSON file. Validates path stays within repo. */
-export function linkFilePath(repoPath: string, id: string): string {
-  const filePath = resolve(repoPath, 'links', `${id}.json`);
-  assertWithinRoot(filePath, repoPath);
-  return filePath;
-}
+/**
+ * Find an entry file by its ID suffix, scanning the type directory.
+ * Returns the full path if found, null otherwise.
+ *
+ * O(n) where n = number of files in the type directory.
+ * Use when the title is unknown or may have changed.
+ */
+export function findEntryFile(repoPath: string, type: KnowledgeType, id: string): string | null {
+  const typeDir = resolve(repoPath, 'entries', type);
+  if (!existsSync(typeDir)) return null;
 
-/** Write an entry JSON file. */
-export function writeEntryFile(repoPath: string, entry: EntryJSON): void {
-  const filePath = entryFilePath(repoPath, entry.type, entry.id);
-  writeFileSync(filePath, JSON.stringify(entry, null, 2) + '\n');
-}
-
-/** Read an entry JSON file and return its raw string content (for comparison). Returns null if the file doesn't exist. */
-export function readEntryFileRaw(repoPath: string, type: KnowledgeType, id: string): string | null {
-  const filePath = entryFilePath(repoPath, type, id);
-  if (!existsSync(filePath)) return null;
-  return readFileSync(filePath, 'utf-8');
-}
-
-/** Read a link JSON file and return its raw string content (for comparison). Returns null if the file doesn't exist. */
-export function readLinkFileRaw(repoPath: string, id: string): string | null {
-  const filePath = linkFilePath(repoPath, id);
-  if (!existsSync(filePath)) return null;
-  return readFileSync(filePath, 'utf-8');
-}
-
-/** Write a link JSON file. */
-export function writeLinkFile(repoPath: string, link: LinkJSON): void {
-  const filePath = linkFilePath(repoPath, link.id);
-  writeFileSync(filePath, JSON.stringify(link, null, 2) + '\n');
-}
-
-/** Delete an entry JSON file. Handles type not being known by searching all type dirs. */
-export function deleteEntryFile(repoPath: string, id: string, type?: KnowledgeType): void {
-  if (type) {
-    const filePath = entryFilePath(repoPath, type, id);
-    if (existsSync(filePath)) unlinkSync(filePath);
-    return;
-  }
-
-  // Search all type directories for the file
-  for (const t of KNOWLEDGE_TYPES) {
-    const filePath = entryFilePath(repoPath, t as KnowledgeType, id);
-    if (existsSync(filePath)) {
-      unlinkSync(filePath);
-      return;
+  const suffix = `_${id8(id)}.md`;
+  const files = readdirSync(typeDir);
+  for (const file of files) {
+    if (file.endsWith(suffix)) {
+      const filePath = join(typeDir, file);
+      assertWithinRoot(filePath, repoPath);
+      return filePath;
     }
   }
+  return null;
 }
 
-/** Delete a link JSON file. */
-export function deleteLinkFile(repoPath: string, id: string): void {
-  const filePath = linkFilePath(repoPath, id);
-  if (existsSync(filePath)) unlinkSync(filePath);
+// ---------------------------------------------------------------------------
+// Write operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Write an entry as a Markdown file with YAML frontmatter.
+ *
+ * If the entry's slug changed (title change), the old file is overwritten
+ * with a redirect marker pointing to the new filename. This prevents
+ * delete-modify merge conflicts in git.
+ */
+export function writeEntryFile(repoPath: string, entry: EntryJSON): void {
+  const newPath = entryFilePath(repoPath, entry.type, entry.id, entry.title);
+  const markdown = entryToMarkdown(entry);
+
+  // Check if an existing file for this ID has a different slug (title changed)
+  const existingPath = findEntryFile(repoPath, entry.type, entry.id);
+  if (existingPath && existingPath !== newPath) {
+    // Title changed — overwrite old file with redirect marker
+    const newFileName = entryFileName(entry.title, entry.id);
+    writeFileSync(existingPath, buildRedirectMarker(newFileName));
+  }
+
+  writeFileSync(newPath, markdown);
 }
 
-/** Read all entry JSON files from the repo. */
+// ---------------------------------------------------------------------------
+// Read operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Read an entry Markdown file and return its raw string content (for comparison).
+ * Returns null if the file doesn't exist.
+ *
+ * If title is provided, tries the deterministic path first (O(1)).
+ * Falls back to findEntryFile (O(n)) if the file isn't at the expected path.
+ */
+export function readEntryFileRaw(repoPath: string, type: KnowledgeType, id: string, title?: string): string | null {
+  // Try deterministic path first if we have a title
+  if (title) {
+    const filePath = entryFilePath(repoPath, type, id, title);
+    if (existsSync(filePath)) {
+      return readFileSync(filePath, 'utf-8');
+    }
+  }
+
+  // Fall back to directory scan
+  const filePath = findEntryFile(repoPath, type, id);
+  if (!filePath) return null;
+  return readFileSync(filePath, 'utf-8');
+}
+
+// ---------------------------------------------------------------------------
+// Delete operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete an entry file. Finds it by ID suffix (handles slug changes).
+ * Also deletes any redirect files for the same ID.
+ *
+ * If type is provided, only searches that directory. Otherwise searches all type dirs.
+ */
+export function deleteEntryFile(repoPath: string, id: string, type?: KnowledgeType): void {
+  const typesToSearch = type ? [type] : KNOWLEDGE_TYPES;
+
+  for (const t of typesToSearch) {
+    const typeDir = resolve(repoPath, 'entries', t);
+    if (!existsSync(typeDir)) continue;
+
+    const suffix = `_${id8(id)}.md`;
+    const files = readdirSync(typeDir);
+    for (const file of files) {
+      if (file.endsWith(suffix)) {
+        const filePath = join(typeDir, file);
+        assertWithinRoot(filePath, repoPath);
+        unlinkSync(filePath);
+        // Don't return — there may be a redirect file with the same ID suffix
+      }
+    }
+
+    if (type) return; // Only searched the specified type
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bulk read operations
+// ---------------------------------------------------------------------------
+
+/**
+ * Read all entry Markdown files from the repo.
+ *
+ * Skips redirect marker files. Deduplicates by entry ID — if two files
+ * parse to the same ID (can happen after a merge with rename conflicts),
+ * the entry with the higher version is kept and a warning is logged.
+ */
 export function readAllEntryFiles(repoPath: string): EntryJSON[] {
-  const entries: EntryJSON[] = [];
   const entriesDir = resolve(repoPath, 'entries');
+  if (!existsSync(entriesDir)) return [];
 
-  if (!existsSync(entriesDir)) return entries;
+  // Map for dedup: id -> { entry, source file }
+  const seen = new Map<string, { entry: EntryJSON; file: string }>();
 
   for (const type of KNOWLEDGE_TYPES) {
     const typeDir = resolve(entriesDir, type);
     if (!existsSync(typeDir)) continue;
 
-    const files = readdirSync(typeDir).filter((f) => f.endsWith('.json'));
+    const files = readdirSync(typeDir).filter((f) => f.endsWith('.md'));
     for (const file of files) {
       try {
         const filePath = join(typeDir, file);
         assertWithinRoot(filePath, repoPath);
         const content = readFileSync(filePath, 'utf-8');
-        const data = JSON.parse(content);
-        entries.push(parseEntryJSON(data));
+
+        // Skip redirect markers
+        if (parseRedirect(content) !== null) continue;
+
+        const entry = parseEntryMarkdown(content);
+        const existing = seen.get(entry.id);
+
+        if (existing) {
+          // Duplicate ID — keep higher version
+          if (entry.version > existing.entry.version) {
+            console.error(`Warning: Duplicate entry ID ${entry.id} found in ${existing.file} and ${type}/${file}, keeping version ${entry.version} from ${type}/${file}`);
+            seen.set(entry.id, { entry, file: `${type}/${file}` });
+          } else {
+            console.error(`Warning: Duplicate entry ID ${entry.id} found in ${existing.file} and ${type}/${file}, keeping version ${existing.entry.version} from ${existing.file}`);
+          }
+        } else {
+          seen.set(entry.id, { entry, file: `${type}/${file}` });
+        }
       } catch (error) {
         console.error(`Warning: Failed to parse ${type}/${file}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
 
-  return entries;
+  return Array.from(seen.values()).map((v) => v.entry);
 }
 
 /** Read all link JSON files from the repo. */
@@ -183,7 +289,19 @@ export function readAllLinkFiles(repoPath: string): LinkJSON[] {
   return links;
 }
 
-/** Get all entry IDs present in the repo (for detecting remote deletions). */
+// ---------------------------------------------------------------------------
+// ID extraction (for detecting remote deletions)
+// ---------------------------------------------------------------------------
+
+/**
+ * Get all entry ID prefixes (8-char) present in the repo.
+ *
+ * Extracts ID from filename suffix via regex. Returns 8-char prefixes,
+ * so callers must compare using id8(fullId).
+ *
+ * Skips redirect markers — their IDs are already accounted for by
+ * the canonical file they point to.
+ */
 export function getRepoEntryIds(repoPath: string): Set<string> {
   const ids = new Set<string>();
   const entriesDir = resolve(repoPath, 'entries');
@@ -194,26 +312,212 @@ export function getRepoEntryIds(repoPath: string): Set<string> {
     const typeDir = resolve(entriesDir, type);
     if (!existsSync(typeDir)) continue;
 
-    const files = readdirSync(typeDir).filter((f) => f.endsWith('.json'));
+    const files = readdirSync(typeDir).filter((f) => f.endsWith('.md'));
     for (const file of files) {
-      ids.add(file.replace('.json', ''));
+      // Check if it's a redirect marker — skip it
+      const filePath = join(typeDir, file);
+      try {
+        const content = readFileSync(filePath, 'utf-8');
+        if (parseRedirect(content) !== null) continue;
+      } catch {
+        continue;
+      }
+
+      const match = file.match(ENTRY_FILENAME_RE);
+      if (match) {
+        ids.add(match[1]);
+      }
     }
   }
 
   return ids;
 }
 
-/** Get all link IDs present in the repo. */
-export function getRepoLinkIds(repoPath: string): Set<string> {
-  const ids = new Set<string>();
-  const linksDir = resolve(repoPath, 'links');
+// ---------------------------------------------------------------------------
+// Redirect cleanup
+// ---------------------------------------------------------------------------
 
-  if (!existsSync(linksDir)) return ids;
+/**
+ * Remove all redirect marker files from the repo.
+ * Called during push() after all canonical entry files have been written.
+ * Returns the number of redirect files removed.
+ */
+export function cleanupRedirectFiles(repoPath: string): number {
+  let cleaned = 0;
+  const entriesDir = resolve(repoPath, 'entries');
+  if (!existsSync(entriesDir)) return cleaned;
 
-  const files = readdirSync(linksDir).filter((f) => f.endsWith('.json'));
-  for (const file of files) {
-    ids.add(file.replace('.json', ''));
+  for (const type of KNOWLEDGE_TYPES) {
+    const typeDir = resolve(entriesDir, type);
+    if (!existsSync(typeDir)) continue;
+
+    const files = readdirSync(typeDir).filter((f) => f.endsWith('.md'));
+    for (const file of files) {
+      const filePath = join(typeDir, file);
+      try {
+        assertWithinRoot(filePath, repoPath);
+        const content = readFileSync(filePath, 'utf-8');
+        if (parseRedirect(content) !== null) {
+          unlinkSync(filePath);
+          cleaned++;
+        }
+      } catch {
+        // Skip files we can't read
+      }
+    }
   }
 
-  return ids;
+  return cleaned;
+}
+
+// ---------------------------------------------------------------------------
+// Migration: JSON → Markdown
+// ---------------------------------------------------------------------------
+
+/**
+ * Migrate all entry JSON files in a repo to Markdown with YAML frontmatter.
+ *
+ * For each .json file in entries/{type}/:
+ *   1. Parse as EntryJSON
+ *   2. Write as .md with entryToMarkdown()
+ *   3. Delete the .json file
+ *
+ * Called once on server startup, before the first pull.
+ * Idempotent — skips if no .json files exist.
+ *
+ * Returns the number of files migrated.
+ */
+export function migrateJsonToMarkdown(repoPath: string): number {
+  let migrated = 0;
+  const entriesDir = resolve(repoPath, 'entries');
+  if (!existsSync(entriesDir)) return migrated;
+
+  for (const type of KNOWLEDGE_TYPES) {
+    const typeDir = resolve(entriesDir, type);
+    if (!existsSync(typeDir)) continue;
+
+    const jsonFiles = readdirSync(typeDir).filter((f) => f.endsWith('.json'));
+    for (const file of jsonFiles) {
+      try {
+        const jsonPath = join(typeDir, file);
+        assertWithinRoot(jsonPath, repoPath);
+        const content = readFileSync(jsonPath, 'utf-8');
+        const data = JSON.parse(content);
+        const entry = parseEntryJSON(data);
+
+        // Write as markdown
+        const mdPath = entryFilePath(repoPath, entry.type as KnowledgeType, entry.id, entry.title);
+        writeFileSync(mdPath, entryToMarkdown(entry));
+
+        // Delete old JSON file
+        unlinkSync(jsonPath);
+        migrated++;
+      } catch (error) {
+        console.error(`Warning: Failed to migrate ${type}/${file}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  return migrated;
+}
+
+// ---------------------------------------------------------------------------
+// Migration: Link JSON files → entry frontmatter (schema v2 → v3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove the `links/` directory from a sync repo if it exists.
+ * Called during push to clean up after migrating links into entry frontmatter.
+ */
+export function cleanupLinksDirectory(repoPath: string): boolean {
+  const linksDir = resolve(repoPath, 'links');
+  if (!existsSync(linksDir)) return false;
+
+  rmSync(linksDir, { recursive: true, force: true });
+  return true;
+}
+
+/**
+ * Migrate link JSON files into entry Markdown frontmatter.
+ *
+ * Reads all `links/{id}.json` files, groups by source_id, reads each
+ * source entry's `.md` file, adds links to frontmatter, rewrites the
+ * file, then deletes the `links/` directory.
+ *
+ * Called on server startup alongside the JSON→MD migration.
+ * Idempotent — skips if no `links/` directory exists.
+ *
+ * Returns the number of links migrated.
+ */
+export function migrateLinkFilesToFrontmatter(repoPath: string): number {
+  const linksDir = resolve(repoPath, 'links');
+  if (!existsSync(linksDir)) return 0;
+
+  // Read all link files
+  const linkFiles = readdirSync(linksDir).filter((f) => f.endsWith('.json'));
+  if (linkFiles.length === 0) {
+    // No link files — just clean up the empty directory
+    cleanupLinksDirectory(repoPath);
+    return 0;
+  }
+
+  // Group links by source_id
+  const linksBySource = new Map<string, Array<{ target: string; type: string; description?: string }>>();
+  for (const file of linkFiles) {
+    try {
+      const filePath = join(linksDir, file);
+      assertWithinRoot(filePath, repoPath);
+      const content = readFileSync(filePath, 'utf-8');
+      const data = JSON.parse(content);
+      const link = parseLinkJSON(data);
+
+      const existing = linksBySource.get(link.source_id) || [];
+      const fmLink: { target: string; type: string; description?: string } = {
+        target: link.target_id,
+        type: link.link_type,
+      };
+      if (link.description) fmLink.description = link.description;
+      existing.push(fmLink);
+      linksBySource.set(link.source_id, existing);
+    } catch (error) {
+      console.error(`Warning: Failed to parse link file ${file} during migration: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // For each source entry, read its .md file, add links to frontmatter, rewrite
+  let migrated = 0;
+  for (const [sourceId, links] of linksBySource) {
+    try {
+      // Find the entry file — we don't know the type, so search all type dirs
+      let entryPath: string | null = null;
+      let entry: EntryJSON | null = null;
+
+      for (const type of KNOWLEDGE_TYPES) {
+        const found = findEntryFile(repoPath, type, sourceId);
+        if (found) {
+          entryPath = found;
+          const content = readFileSync(found, 'utf-8');
+          entry = parseEntryMarkdown(content);
+          break;
+        }
+      }
+
+      if (!entryPath || !entry) {
+        console.error(`Warning: Source entry ${sourceId} not found during link migration, skipping ${links.length} links`);
+        continue;
+      }
+
+      // Add links to entry and rewrite
+      entry.links = links;
+      writeFileSync(entryPath, entryToMarkdown(entry));
+      migrated += links.length;
+    } catch (error) {
+      console.error(`Warning: Failed to migrate links for entry ${sourceId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Clean up links directory
+  cleanupLinksDirectory(repoPath);
+
+  return migrated;
 }

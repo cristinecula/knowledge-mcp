@@ -64,7 +64,7 @@ describe('commit-scheduler', () => {
 
   it('should commit touched repos on flush', () => {
     // Write a file so there's something to commit
-    writeFileSync(join(repoPath, 'entries', 'fact', 'test.json'), '{}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'test_00000000.md'), '{}');
     touchedRepos.add(repoPath);
 
     scheduleCommit('flush test');
@@ -81,15 +81,15 @@ describe('commit-scheduler', () => {
   });
 
   it('should batch multiple scheduleCommit calls into one commit', () => {
-    writeFileSync(join(repoPath, 'entries', 'fact', 'test1.json'), '{"a":1}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'test1_00000001.md'), '{"a":1}');
     touchedRepos.add(repoPath);
     scheduleCommit('first message');
 
-    writeFileSync(join(repoPath, 'entries', 'fact', 'test2.json'), '{"b":2}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'test2_00000002.md'), '{"b":2}');
     touchedRepos.add(repoPath);
     scheduleCommit('second message');
 
-    writeFileSync(join(repoPath, 'entries', 'fact', 'test3.json'), '{"c":3}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'test3_00000003.md'), '{"c":3}');
     touchedRepos.add(repoPath);
     scheduleCommit('third message');
 
@@ -109,7 +109,7 @@ describe('commit-scheduler', () => {
   });
 
   it('should include all messages in the batched commit body', () => {
-    writeFileSync(join(repoPath, 'entries', 'fact', 'a.json'), '{"a":1}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'a_00000004.md'), '{"a":1}');
     touchedRepos.add(repoPath);
     scheduleCommit('msg-alpha');
     scheduleCommit('msg-beta');
@@ -126,7 +126,7 @@ describe('commit-scheduler', () => {
   });
 
   it('should auto-commit after debounce window', async () => {
-    writeFileSync(join(repoPath, 'entries', 'fact', 'auto.json'), '{"auto":true}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'auto_00000005.md'), '{"auto":true}');
     touchedRepos.add(repoPath);
 
     scheduleCommit('auto commit test');
@@ -160,7 +160,7 @@ describe('commit-scheduler', () => {
   });
 
   it('should clear touchedRepos after committing', () => {
-    writeFileSync(join(repoPath, 'entries', 'fact', 'clear.json'), '{}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'clear_00000006.md'), '{}');
     touchedRepos.add(repoPath);
 
     scheduleCommit('clear test');
@@ -171,7 +171,7 @@ describe('commit-scheduler', () => {
 
   it('should reset debounce timer on each scheduleCommit call', async () => {
     // First call starts the timer
-    writeFileSync(join(repoPath, 'entries', 'fact', 'reset1.json'), '{"r":1}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'reset1_00000007.md'), '{"r":1}');
     touchedRepos.add(repoPath);
     scheduleCommit('reset msg 1');
 
@@ -179,7 +179,7 @@ describe('commit-scheduler', () => {
     await new Promise((resolve) => setTimeout(resolve, COMMIT_DEBOUNCE_MS / 2));
 
     // Second call should reset the timer
-    writeFileSync(join(repoPath, 'entries', 'fact', 'reset2.json'), '{"r":2}');
+    writeFileSync(join(repoPath, 'entries', 'fact', 'reset2_00000008.md'), '{"r":2}');
     touchedRepos.add(repoPath);
     scheduleCommit('reset msg 2');
 
