@@ -37,7 +37,7 @@ import {
 } from './fs.js';
 import { gitPull } from './git.js';
 import { deterministicLinkId } from './serialize.js';
-import type { EntryJSON, FrontmatterLink } from './serialize.js';
+import type { EntryJSON } from './serialize.js';
 import type { KnowledgeType, LinkType, Scope, Status } from '../types.js';
 import { INACCURACY_THRESHOLD } from '../types.js';
 
