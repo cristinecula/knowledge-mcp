@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { insertKnowledge, insertLink } from '../db/queries.js';
+import { insertKnowledge, insertLink, flagSupersededEntries, getKnowledgeById } from '../db/queries.js';
 import { syncWriteEntry, syncWriteEntryWithLinks, scheduleCommit } from '../sync/index.js';
-import { KNOWLEDGE_TYPES, LINK_TYPES, SCOPES } from '../types.js';
+import { KNOWLEDGE_TYPES, LINK_TYPES, SCOPES, INACCURACY_THRESHOLD } from '../types.js';
 import type { LinkType } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
 
@@ -60,6 +60,7 @@ export function registerStoreTool(server: McpServer): void {
         });
 
         if (links && links.length > 0) {
+          const insertedLinks: Array<{ sourceId: string; targetId: string; linkType: string }> = [];
           for (const link of links) {
             insertLink({
               sourceId: entry.id,
@@ -68,9 +69,24 @@ export function registerStoreTool(server: McpServer): void {
               description: link.description,
               source: source || 'agent',
             });
+            insertedLinks.push({ sourceId: entry.id, targetId: link.target_id, linkType: link.link_type });
           }
           // Rewrite entry file with links in frontmatter
           syncWriteEntryWithLinks(entry);
+
+          // Flag superseded entries (if any supersedes links were created)
+          const supersedeBumps = flagSupersededEntries(insertedLinks);
+
+          // Sync bumped entries so inaccuracy changes are shared
+          for (const bump of supersedeBumps) {
+            const bumpedEntry = getKnowledgeById(bump.id);
+            if (bumpedEntry) {
+              syncWriteEntry(bumpedEntry);
+            }
+          }
+          if (supersedeBumps.length > 0) {
+            scheduleCommit(`knowledge: flag superseded entries from "${entry.title}"`);
+          }
         }
 
         // Schedule a debounced git commit

@@ -994,6 +994,64 @@ export function setInaccuracy(id: string, value: number): void {
 }
 
 /**
+ * Flag entries that have been superseded.
+ *
+ * When a `supersedes` link is created, the superseded (target) entry should be
+ * flagged for revalidation — being superseded implies the old entry may be outdated.
+ * Also propagates inaccuracy from the superseded entry to its own dependents via BFS.
+ *
+ * Skips deprecated targets (they don't need inaccuracy tracking).
+ * Excludes the superseding (source) entry from cascade propagation — the entry
+ * that declares the supersedes link is new/authoritative and should not be flagged.
+ *
+ * @param newLinks - Array of links that were just inserted (with sourceId, targetId, linkType)
+ * @returns Array of all inaccuracy bumps (the superseded targets + their dependents)
+ */
+export function flagSupersededEntries(
+  newLinks: Array<{ sourceId: string; targetId: string; linkType: string }>,
+): InaccuracyBump[] {
+  const allBumps: InaccuracyBump[] = [];
+
+  for (const link of newLinks) {
+    if (link.linkType !== 'supersedes') continue;
+
+    const target = getKnowledgeById(link.targetId);
+    if (!target) continue;
+
+    // Don't flag deprecated entries
+    if (target.status === 'deprecated') continue;
+
+    const previousInaccuracy = target.inaccuracy ?? 0;
+    const newInaccuracy = Math.max(previousInaccuracy, INACCURACY_THRESHOLD);
+
+    // Only bump if it's a meaningful increase
+    if (newInaccuracy > previousInaccuracy + 0.0001) {
+      setInaccuracy(link.targetId, newInaccuracy);
+      allBumps.push({ id: link.targetId, previousInaccuracy, newInaccuracy });
+    }
+
+    // Propagate from the superseded entry to its own dependents
+    const cascadeBumps = propagateInaccuracy(link.targetId, INACCURACY_THRESHOLD);
+    for (const bump of cascadeBumps) {
+      // Exclude the superseding entry — it's the new/authoritative one
+      if (bump.id === link.sourceId) {
+        // Undo the bump on the superseding entry
+        resetInaccuracy(link.sourceId);
+        continue;
+      }
+      const existing = allBumps.find((b) => b.id === bump.id);
+      if (existing) {
+        existing.newInaccuracy = Math.max(existing.newInaccuracy, bump.newInaccuracy);
+      } else {
+        allBumps.push(bump);
+      }
+    }
+  }
+
+  return allBumps;
+}
+
+/**
  * Propagate inaccuracy through the knowledge graph via BFS.
  *
  * When an entry is updated, linked entries accumulate inaccuracy based on:

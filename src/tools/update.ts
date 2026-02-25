@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { updateKnowledgeFields, getKnowledgeById, getOutgoingLinks, getLinksForEntry, updateKnowledgeContent, resetInaccuracy, computeDiffFactor, propagateInaccuracy, insertLink, deleteLink } from '../db/queries.js';
+import { updateKnowledgeFields, getKnowledgeById, getOutgoingLinks, getLinksForEntry, updateKnowledgeContent, resetInaccuracy, computeDiffFactor, propagateInaccuracy, flagSupersededEntries, insertLink, deleteLink } from '../db/queries.js';
 import { syncWriteEntry, syncWriteEntryWithLinks, scheduleCommit } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, SCOPES, LINK_TYPES, INACCURACY_THRESHOLD } from '../types.js';
 import type { LinkType } from '../types.js';
@@ -83,6 +83,7 @@ export function registerUpdateTool(server: McpServer): void {
           // Handle declarative links (set-based: replaces all non-conflict outgoing links)
           let linksAdded = 0;
           let linksRemoved = 0;
+          const newlyInsertedLinks: Array<{ sourceId: string; targetId: string; linkType: string }> = [];
           if (links !== undefined) {
             // Get current outgoing links (excluding conflict-related ones)
             const currentOutgoing = getOutgoingLinks(id).filter(
@@ -122,6 +123,7 @@ export function registerUpdateTool(server: McpServer): void {
                     description: link.description,
                     source: updated.source || 'agent',
                   });
+                  newlyInsertedLinks.push({ sourceId: id, targetId: link.target_id, linkType: link.link_type });
                   linksAdded++;
                 } catch {
                   // Skip duplicates or FK violations
@@ -151,6 +153,18 @@ export function registerUpdateTool(server: McpServer): void {
 
           // Propagate inaccuracy through the knowledge graph
           const bumps = propagateInaccuracy(id, diffFactor);
+
+          // Flag superseded entries (if any supersedes links were just created)
+          const supersedeBumps = flagSupersededEntries(newlyInsertedLinks);
+          // Merge supersede bumps into the main bumps array
+          for (const sb of supersedeBumps) {
+            const existing = bumps.find((b) => b.id === sb.id);
+            if (existing) {
+              existing.newInaccuracy = Math.max(existing.newInaccuracy, sb.newInaccuracy);
+            } else {
+              bumps.push(sb);
+            }
+          }
 
           // Sync bumped entries so inaccuracy changes are shared
           for (const bump of bumps) {

@@ -31,6 +31,7 @@ import {
   setInaccuracy,
   resetInaccuracy,
   propagateInaccuracy,
+  flagSupersededEntries,
 } from '../db/queries.js';
 import { INACCURACY_THRESHOLD } from '../types.js';
 import type { LinkType } from '../types.js';
@@ -516,7 +517,7 @@ describe('link workflow', () => {
 // === Supersedes revalidation workflow ===
 
 describe('supersedes revalidation workflow', () => {
-  it('should bump inaccuracy on target when supersedes link is created', () => {
+  it('should automatically bump inaccuracy on target when supersedes link is created', () => {
     const old = insertKnowledge({
       type: 'decision',
       title: 'Use Preact Signals',
@@ -529,22 +530,21 @@ describe('supersedes revalidation workflow', () => {
       content: 'We now use Pion Contexts instead of Preact Signals',
     });
 
-    // Simulate update_knowledge tool with links: create supersedes link and flag target
+    // Create supersedes link and call flagSupersededEntries (as update_knowledge does)
     insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
+    const bumps = flagSupersededEntries([{ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' }]);
 
-    const target = getKnowledgeById(old.id)!;
-    if (target.status !== 'deprecated') {
-      setInaccuracy(old.id, INACCURACY_THRESHOLD);
-    }
-
+    // Target should be automatically flagged for revalidation
     expect(getKnowledgeById(old.id)!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
     expect(getKnowledgeById(old.id)!.status).toBe('active');
     // The superseding entry should remain active with no inaccuracy
     expect(getKnowledgeById(replacement.id)!.status).toBe('active');
     expect(getKnowledgeById(replacement.id)!.inaccuracy).toBe(0);
+    // Should have returned the bump
+    expect(bumps.some((b) => b.id === old.id)).toBe(true);
   });
 
-  it('should bump inaccuracy on target when supersedes link is created inline via store', () => {
+  it('should automatically bump inaccuracy on target when supersedes link is created inline via store', () => {
     const old = insertKnowledge({
       type: 'convention',
       title: 'Use REST API',
@@ -559,14 +559,11 @@ describe('supersedes revalidation workflow', () => {
     });
 
     insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
-
-    const target = getKnowledgeById(old.id)!;
-    if (target.status !== 'deprecated') {
-      setInaccuracy(old.id, INACCURACY_THRESHOLD);
-    }
+    const bumps = flagSupersededEntries([{ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' }]);
 
     expect(getKnowledgeById(old.id)!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
     expect(getKnowledgeById(old.id)!.status).toBe('active');
+    expect(bumps.some((b) => b.id === old.id)).toBe(true);
   });
 
   it('should NOT bump inaccuracy on deprecated targets when superseded', () => {
@@ -584,15 +581,12 @@ describe('supersedes revalidation workflow', () => {
     });
 
     insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
-
-    const target = getKnowledgeById(old.id)!;
-    if (target.status !== 'deprecated') {
-      setInaccuracy(old.id, INACCURACY_THRESHOLD);
-    }
+    const bumps = flagSupersededEntries([{ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' }]);
 
     // Should still be deprecated with no inaccuracy bump
     expect(getKnowledgeById(old.id)!.status).toBe('deprecated');
     expect(getKnowledgeById(old.id)!.inaccuracy).toBe(0);
+    expect(bumps).toHaveLength(0);
   });
 
   it('should NOT flag target for non-supersedes link types', () => {
@@ -600,9 +594,49 @@ describe('supersedes revalidation workflow', () => {
     const b = insertKnowledge({ type: 'fact', title: 'Fact B', content: 'content b' });
 
     insertLink({ sourceId: b.id, targetId: a.id, linkType: 'related' });
+    const bumps = flagSupersededEntries([{ sourceId: b.id, targetId: a.id, linkType: 'related' }]);
 
     // related links should NOT trigger revalidation
+    expect(getKnowledgeById(a.id)!.inaccuracy).toBe(0);
     expect(getKnowledgeById(a.id)!.status).toBe('active');
+    expect(bumps).toHaveLength(0);
+  });
+
+  it('should propagate inaccuracy to dependents of the superseded entry', () => {
+    // Create a chain: dependent --derived--> old <--supersedes-- replacement
+    const old = insertKnowledge({
+      type: 'decision',
+      title: 'Old decision',
+      content: 'The original decision',
+    });
+
+    const dependent = insertKnowledge({
+      type: 'pattern',
+      title: 'Pattern based on old decision',
+      content: 'This pattern depends on the old decision',
+    });
+
+    // dependent is derived from old (dependent -> old)
+    insertLink({ sourceId: dependent.id, targetId: old.id, linkType: 'derived' });
+
+    const replacement = insertKnowledge({
+      type: 'decision',
+      title: 'New decision',
+      content: 'Replacement for old decision',
+    });
+
+    insertLink({ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' });
+    const bumps = flagSupersededEntries([{ sourceId: replacement.id, targetId: old.id, linkType: 'supersedes' }]);
+
+    // Old entry should be flagged
+    expect(getKnowledgeById(old.id)!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
+
+    // Dependent should also have been bumped via propagation
+    expect(getKnowledgeById(dependent.id)!.inaccuracy).toBeGreaterThan(0);
+
+    // Both should be in the bumps list
+    expect(bumps.some((b) => b.id === old.id)).toBe(true);
+    expect(bumps.some((b) => b.id === dependent.id)).toBe(true);
   });
 });
 
