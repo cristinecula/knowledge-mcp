@@ -14,8 +14,28 @@ import { gitInit, gitCommitAll, gitFileLog, gitShowFile } from '../sync/git.js';
 import { getEntryHistory, getEntryAtCommit, getEntryAtCommitWithParent } from '../sync/history.js';
 import { setSyncConfig } from '../sync/config.js';
 import { ensureRepoStructure, entryFilePath } from '../sync/fs.js';
+import { entryToMarkdown } from '../sync/serialize.js';
+import type { EntryJSON } from '../sync/serialize.js';
 import { insertKnowledge } from '../db/queries.js';
 import type { SyncConfig } from '../sync/routing.js';
+
+/** Helper to build a minimal EntryJSON for tests. */
+function makeEntryJSON(entry: { id: string; type: string; title: string; created_at: string }, overrides: Partial<EntryJSON> = {}): EntryJSON {
+  return {
+    id: entry.id,
+    type: entry.type as EntryJSON['type'],
+    title: entry.title,
+    content: overrides.content ?? '',
+    tags: [],
+    project: null,
+    scope: 'company',
+    source: 'unknown',
+    status: 'active',
+    created_at: entry.created_at,
+    version: overrides.version ?? 1,
+    ...overrides,
+  };
+}
 
 describe('entry version history', () => {
   let repoPath: string;
@@ -193,37 +213,13 @@ describe('entry version history', () => {
         content: 'Version 1',
       });
 
-      // Write entry JSON and commit
-      const filePath = entryFilePath(repoPath, entry.type, entry.id);
-      writeFileSync(filePath, JSON.stringify({
-        id: entry.id,
-        type: entry.type,
-        title: entry.title,
-        content: 'Version 1',
-        tags: [],
-        project: null,
-        scope: 'company',
-        source: 'unknown',
-        status: 'active',
-        created_at: entry.created_at,
-        version: 1,
-      }, null, 2) + '\n');
+      // Write entry file and commit
+      const filePath = entryFilePath(repoPath, entry.type, entry.id, entry.title);
+      writeFileSync(filePath, entryToMarkdown(makeEntryJSON(entry, { content: 'Version 1', version: 1 })));
       gitCommitAll(repoPath, 'knowledge: store fact "Test fact"');
 
       // Update and commit again
-      writeFileSync(filePath, JSON.stringify({
-        id: entry.id,
-        type: entry.type,
-        title: entry.title,
-        content: 'Version 2',
-        tags: [],
-        project: null,
-        scope: 'company',
-        source: 'unknown',
-        status: 'active',
-        created_at: entry.created_at,
-        version: 2,
-      }, null, 2) + '\n');
+      writeFileSync(filePath, entryToMarkdown(makeEntryJSON(entry, { content: 'Version 2', version: 2 })));
       gitCommitAll(repoPath, 'knowledge: update fact "Test fact"');
 
       const history = getEntryHistory(entry.id);
@@ -285,26 +281,14 @@ describe('entry version history', () => {
         content: 'Original content',
       });
 
-      const filePath = entryFilePath(repoPath, entry.type, entry.id);
-      const entryJson = {
-        id: entry.id,
-        type: entry.type,
-        title: entry.title,
-        content: 'Original content',
-        tags: [],
-        project: null,
-        scope: 'company',
-        source: 'unknown',
-        status: 'active',
-        created_at: entry.created_at,
-        version: 1,
-      };
-      writeFileSync(filePath, JSON.stringify(entryJson, null, 2) + '\n');
+      const filePath = entryFilePath(repoPath, entry.type, entry.id, entry.title);
+      const v1 = makeEntryJSON(entry, { content: 'Original content', version: 1 });
+      writeFileSync(filePath, entryToMarkdown(v1));
       gitCommitAll(repoPath, 'add decision');
 
       // Update content
-      const updatedJson = { ...entryJson, content: 'Updated content', version: 2 };
-      writeFileSync(filePath, JSON.stringify(updatedJson, null, 2) + '\n');
+      const v2 = makeEntryJSON(entry, { content: 'Updated content', version: 2 });
+      writeFileSync(filePath, entryToMarkdown(v2));
       gitCommitAll(repoPath, 'update decision');
 
       // Get history and retrieve the first version
@@ -374,26 +358,14 @@ describe('entry version history', () => {
         content: 'Original content',
       });
 
-      const filePath = entryFilePath(repoPath, entry.type, entry.id);
-      const entryJson = {
-        id: entry.id,
-        type: entry.type,
-        title: entry.title,
-        content: 'Original content',
-        tags: [],
-        project: null,
-        scope: 'company',
-        source: 'unknown',
-        status: 'active',
-        created_at: entry.created_at,
-        version: 1,
-      };
-      writeFileSync(filePath, JSON.stringify(entryJson, null, 2) + '\n');
+      const filePath = entryFilePath(repoPath, entry.type, entry.id, entry.title);
+      const v1 = makeEntryJSON(entry, { content: 'Original content', version: 1 });
+      writeFileSync(filePath, entryToMarkdown(v1));
       gitCommitAll(repoPath, 'add decision');
 
       // Update content
-      const updatedJson = { ...entryJson, content: 'Updated content', version: 2 };
-      writeFileSync(filePath, JSON.stringify(updatedJson, null, 2) + '\n');
+      const v2 = makeEntryJSON(entry, { content: 'Updated content', version: 2 });
+      writeFileSync(filePath, entryToMarkdown(v2));
       gitCommitAll(repoPath, 'update decision');
 
       // Get history — history[0] is newest commit
@@ -415,21 +387,9 @@ describe('entry version history', () => {
         content: 'Initial content',
       });
 
-      const filePath = entryFilePath(repoPath, entry.type, entry.id);
-      const entryJson = {
-        id: entry.id,
-        type: entry.type,
-        title: entry.title,
-        content: 'Initial content',
-        tags: [],
-        project: null,
-        scope: 'company',
-        source: 'unknown',
-        status: 'active',
-        created_at: entry.created_at,
-        version: 1,
-      };
-      writeFileSync(filePath, JSON.stringify(entryJson, null, 2) + '\n');
+      const filePath = entryFilePath(repoPath, entry.type, entry.id, entry.title);
+      const v1 = makeEntryJSON(entry, { content: 'Initial content', version: 1 });
+      writeFileSync(filePath, entryToMarkdown(v1));
       gitCommitAll(repoPath, 'add fact');
 
       const history = getEntryHistory(entry.id);

@@ -45,7 +45,7 @@ import {
   releaseSyncLock,
 } from '../sync/index.js';
 import { gitInit, gitCommitAll, isGitRepo } from '../sync/git.js';
-import type { EntryJSON } from '../sync/serialize.js';
+import { entryFileName, entryToMarkdown, parseEntryMarkdown, type EntryJSON } from '../sync/serialize.js';
 import type { SyncConfig } from '../sync/routing.js';
 
 describe('sync layer', () => {
@@ -181,7 +181,7 @@ describe('sync layer', () => {
       };
 
       writeEntryFile(repoPath, entry);
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${testId}.json`))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Title', testId)))).toBe(true);
     });
   });
 
@@ -222,7 +222,7 @@ describe('sync layer', () => {
       const entry = insertKnowledge({ title: 'Test', type: 'fact', content: 'Content' });
       syncWriteEntry(entry);
 
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Test', entry.id)))).toBe(true);
       expect(touchedRepos.has(repoPath)).toBe(true);
     });
 
@@ -234,8 +234,8 @@ describe('sync layer', () => {
       const updated = updateKnowledgeFields(entry.id, { type: 'pattern' });
       syncWriteEntry(updated!, 'fact'); // oldType='fact'
 
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(false);
-      expect(existsSync(join(repoPath, 'entries', 'pattern', `${entry.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Test', entry.id)))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'pattern', entryFileName('Test', entry.id)))).toBe(true);
     });
 
     it('should route to correct repo based on config', () => {
@@ -251,14 +251,14 @@ describe('sync layer', () => {
       // Company entry -> repoPath
       const companyEntry = insertKnowledge({ title: 'Company', type: 'fact', content: 'C', scope: 'company' });
       syncWriteEntry(companyEntry);
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${companyEntry.id}.json`))).toBe(true);
-      expect(existsSync(join(repoPath2, 'entries', 'fact', `${companyEntry.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Company', companyEntry.id)))).toBe(true);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Company', companyEntry.id)))).toBe(false);
 
       // Project entry -> repoPath2
       const projectEntry = insertKnowledge({ title: 'Project', type: 'fact', content: 'P', scope: 'project' });
       syncWriteEntry(projectEntry);
-      expect(existsSync(join(repoPath2, 'entries', 'fact', `${projectEntry.id}.json`))).toBe(true);
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${projectEntry.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Project', projectEntry.id)))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Project', projectEntry.id)))).toBe(false);
     });
 
     it('should move entry between repos when scope changes', () => {
@@ -274,15 +274,15 @@ describe('sync layer', () => {
       // Start as project
       const entry = insertKnowledge({ title: 'Move Me', type: 'fact', content: 'C', scope: 'project' });
       syncWriteEntry(entry);
-      expect(existsSync(join(repoPath2, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Move Me', entry.id)))).toBe(true);
 
       // Change to company
       const updated = updateKnowledgeFields(entry.id, { scope: 'company' });
       syncWriteEntry(updated!, 'fact', 'project', null); // oldScope='project'
 
       // Should be gone from project repo, present in company repo
-      expect(existsSync(join(repoPath2, 'entries', 'fact', `${entry.id}.json`))).toBe(false);
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Move Me', entry.id)))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Move Me', entry.id)))).toBe(true);
       
       expect(touchedRepos.has(repoPath)).toBe(true);
       expect(touchedRepos.has(repoPath2)).toBe(true);
@@ -391,12 +391,12 @@ describe('sync layer', () => {
       expect(result.new_entries).toBe(2);
 
       // Check files in correct repos
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${e1.id}.json`))).toBe(true);
-      expect(existsSync(join(repoPath2, 'entries', 'fact', `${e2.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Company', e1.id)))).toBe(true);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Project', e2.id)))).toBe(true);
 
       // Check files NOT in wrong repos
-      expect(existsSync(join(repoPath2, 'entries', 'fact', `${e1.id}.json`))).toBe(false);
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${e2.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Company', e1.id)))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Project', e2.id)))).toBe(false);
     });
   });
 
@@ -620,12 +620,12 @@ describe('sync layer', () => {
     it('should delete entry file from repo', () => {
       const entry = insertKnowledge({ title: 'Delete Me', type: 'fact', content: '' });
       syncWriteEntry(entry);
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Delete Me', entry.id)))).toBe(true);
 
       clearTouchedRepos();
       syncDeleteEntry(entry.id, 'fact');
 
-      expect(existsSync(join(repoPath, 'entries', 'fact', `${entry.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'fact', entryFileName('Delete Me', entry.id)))).toBe(false);
       expect(touchedRepos.has(repoPath)).toBe(true);
     });
 
@@ -636,7 +636,7 @@ describe('sync layer', () => {
       clearTouchedRepos();
       syncDeleteEntry(entry.id); // no type hint
 
-      expect(existsSync(join(repoPath, 'entries', 'decision', `${entry.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath, 'entries', 'decision', entryFileName('Delete Me', entry.id)))).toBe(false);
     });
 
     it('should delete from correct repo in multi-repo config', () => {
@@ -650,13 +650,13 @@ describe('sync layer', () => {
 
       const entry = insertKnowledge({ title: 'Project Entry', type: 'fact', content: '', scope: 'project' });
       syncWriteEntry(entry);
-      expect(existsSync(join(repoPath2, 'entries', 'fact', `${entry.id}.json`))).toBe(true);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Project Entry', entry.id)))).toBe(true);
 
       clearTouchedRepos();
       syncDeleteEntry(entry.id, 'fact');
 
       // Should be deleted from project repo
-      expect(existsSync(join(repoPath2, 'entries', 'fact', `${entry.id}.json`))).toBe(false);
+      expect(existsSync(join(repoPath2, 'entries', 'fact', entryFileName('Project Entry', entry.id)))).toBe(false);
       expect(touchedRepos.has(repoPath2)).toBe(true);
     });
   });
@@ -1199,8 +1199,8 @@ describe('sync layer', () => {
       writeEntryFile(repoPath, deprecated!);
 
       // Read file back
-      const filePath = join(repoPath, 'entries', 'fact', `${entry.id}.json`);
-      const fileContent = JSON.parse(readFileSync(filePath, 'utf-8'));
+      const filePath = join(repoPath, 'entries', 'fact', entryFileName('Deprecated via file', entry.id));
+      const fileContent = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
       expect(fileContent.deprecation_reason).toBe('Moved to docs');
       expect(fileContent.status).toBe('deprecated');
     });
@@ -1228,7 +1228,7 @@ describe('sync layer', () => {
       // Write entry file to repo
       const entryDir = join(repoPath, 'entries', 'convention');
       mkdirSync(entryDir, { recursive: true });
-      writeFileSync(join(entryDir, `${entryId}.json`), JSON.stringify(entryJSON));
+      writeFileSync(join(entryDir, entryFileName('Deprecated convention', entryId)), entryToMarkdown(entryJSON));
       gitCommitAll(repoPath, 'add deprecated entry');
 
       // Pull
@@ -1331,8 +1331,8 @@ describe('sync layer', () => {
       writeEntryFile(repoPath, entry);
 
       // Read file back
-      const filePath = join(repoPath, 'entries', 'wiki', `${entry.id}.json`);
-      const fileContent = JSON.parse(readFileSync(filePath, 'utf-8'));
+      const filePath = join(repoPath, 'entries', 'wiki', entryFileName('File-synced wiki', entry.id));
+      const fileContent = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
       expect(fileContent.declaration).toBe('Document the deployment process');
       expect(fileContent.type).toBe('wiki');
     });
@@ -1360,7 +1360,7 @@ describe('sync layer', () => {
       // Write entry file to repo
       const entryDir = join(repoPath, 'entries', 'wiki');
       mkdirSync(entryDir, { recursive: true });
-      writeFileSync(join(entryDir, `${entryId}.json`), JSON.stringify(entryJSON));
+      writeFileSync(join(entryDir, entryFileName('Imported wiki page', entryId)), entryToMarkdown(entryJSON));
       gitCommitAll(repoPath, 'add wiki entry');
 
       // Pull
@@ -1519,8 +1519,8 @@ describe('sync layer', () => {
 
       const entryDir = join(repoPath, 'entries', 'wiki');
       mkdirSync(entryDir, { recursive: true });
-      writeFileSync(join(entryDir, `${parentId}.json`), JSON.stringify(parentJSON));
-      writeFileSync(join(entryDir, `${childId}.json`), JSON.stringify(childJSON));
+      writeFileSync(join(entryDir, entryFileName('Imported parent', parentId)), entryToMarkdown(parentJSON));
+      writeFileSync(join(entryDir, entryFileName('Imported child', childId)), entryToMarkdown(childJSON));
       gitCommitAll(repoPath, 'add wiki entries');
 
       const result = await pull(config);
@@ -1650,8 +1650,8 @@ describe('sync layer', () => {
       writeEntryFile(repoPath, entryToJSON(flagged!));
 
       // Read file back
-      const filePath = join(repoPath, 'entries', 'wiki', `${entry.id}.json`);
-      const fileContent = JSON.parse(readFileSync(filePath, 'utf-8'));
+      const filePath = join(repoPath, 'entries', 'wiki', entryFileName('Flagged via file', entry.id));
+      const fileContent = parseEntryMarkdown(readFileSync(filePath, 'utf-8'));
       expect(fileContent.flag_reason).toBe('Needs review');
       expect(fileContent.status).toBe('active');
       expect(fileContent.inaccuracy).toBeGreaterThanOrEqual(1.0);
@@ -1681,7 +1681,7 @@ describe('sync layer', () => {
       // Write entry file to repo
       const entryDir = join(repoPath, 'entries', 'wiki');
       mkdirSync(entryDir, { recursive: true });
-      writeFileSync(join(entryDir, `${entryId}.json`), JSON.stringify(entryJSON));
+      writeFileSync(join(entryDir, entryFileName('Flagged wiki page', entryId)), entryToMarkdown(entryJSON));
       gitCommitAll(repoPath, 'add flagged entry');
 
       // Pull
@@ -1697,8 +1697,8 @@ describe('sync layer', () => {
   });
 
   describe('pull→push roundtrip stability', () => {
-    it('should produce byte-identical JSON after pull→push roundtrip', async () => {
-      // updated_at is no longer serialized — the JSON should be stable across roundtrips
+    it('should produce byte-identical markdown after pull→push roundtrip', async () => {
+      // updated_at is no longer serialized — the markdown should be stable across roundtrips
       const remoteId = '00000000-0000-4000-a000-000000000098';
       const remoteJSON: EntryJSON = {
         id: remoteId,
@@ -1721,12 +1721,12 @@ describe('sync layer', () => {
       const pullResult = await pull(config);
       expect(pullResult.new_entries).toBe(1);
 
-      // Push — should write byte-identical JSON (no updated_at drift)
+      // Push — should write byte-identical markdown (no updated_at drift)
       await push(config);
 
       // Read the file back and compare
       const fileContent = readEntryFileRaw(repoPath, 'fact', remoteId);
-      const expected = JSON.stringify(remoteJSON, null, 2) + '\n';
+      const expected = entryToMarkdown(remoteJSON);
       expect(fileContent).toBe(expected);
     });
   });
@@ -1774,7 +1774,7 @@ describe('sync layer', () => {
       // Verify file has new content
       const fileContent = readEntryFileRaw(repoPath, 'fact', entry.id);
       expect(fileContent).not.toBeNull();
-      const parsed = JSON.parse(fileContent!);
+      const parsed = parseEntryMarkdown(fileContent!);
       expect(parsed.content).toBe('Updated content');
     });
   });

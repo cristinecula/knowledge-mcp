@@ -14,6 +14,8 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'node:
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { entryFileName, entryToMarkdown, type EntryJSON } from '../sync/serialize.js';
+import { SYNC_SCHEMA_VERSION } from '../sync/config.js';
 
 const SERVER_PATH = resolve(import.meta.dirname, '../../build/index.js');
 
@@ -358,25 +360,25 @@ export function seedRemote(
     if (!existsSync(linksDir)) mkdirSync(linksDir, { recursive: true });
 
     // Write meta.json
-    writeFileSync(join(tmpDir, 'meta.json'), JSON.stringify({ schema_version: 1 }, null, 2) + '\n');
+    writeFileSync(join(tmpDir, 'meta.json'), JSON.stringify({ schema_version: SYNC_SCHEMA_VERSION }, null, 2) + '\n');
 
     // Write entries
     const now = new Date().toISOString();
     for (const e of entries) {
-      const json = {
+      const json: EntryJSON = {
         id: e.id,
-        type: e.type,
+        type: e.type as EntryJSON['type'],
         title: e.title,
         content: e.content,
         tags: e.tags ?? [],
         project: e.project ?? null,
-        scope: e.scope ?? 'company',
+        scope: (e.scope ?? 'company') as EntryJSON['scope'],
         source: 'seed',
-        status: 'active',
+        status: 'active' as const,
         created_at: now,
         version: 1,
       };
-      writeFileSync(join(tmpDir, 'entries', e.type, `${e.id}.json`), JSON.stringify(json, null, 2) + '\n');
+      writeFileSync(join(tmpDir, 'entries', e.type, entryFileName(e.title, e.id)), entryToMarkdown(json));
     }
 
     // Write links
@@ -404,7 +406,7 @@ export function seedRemote(
 }
 
 /**
- * Write a malformed JSON file directly into a bare remote.
+ * Write a malformed file directly into a bare remote.
  */
 export function seedMalformedFile(
   remotePath: string,

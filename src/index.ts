@@ -36,9 +36,11 @@ import {
   flushCommit,
   loadSyncConfig,
   ensureRepoStructure,
+  migrateJsonToMarkdown,
   gitInit,
   gitPull,
   gitClone,
+  gitCommitAll,
   hasRemote,
   gitAddRemote,
 } from './sync/index.js';
@@ -172,6 +174,13 @@ async function main(): Promise<void> {
 
       // 4. Ensure structure
       ensureRepoStructure(repo.path);
+
+      // 5. Migrate old JSON entry files to Markdown (schema v1 → v2)
+      const migrated = migrateJsonToMarkdown(repo.path);
+      if (migrated > 0) {
+        console.error(`Migrated ${migrated} entry files from JSON to Markdown in ${repo.name}`);
+        gitCommitAll(repo.path, 'knowledge: migrate entries from JSON to Markdown');
+      }
     }
 
     // Pull import

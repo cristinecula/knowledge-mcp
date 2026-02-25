@@ -1,8 +1,9 @@
 /**
- * Push: export local entries to the sync repo as JSON files.
+ * Push: export local entries to the sync repo as Markdown files.
  *
  * Writes all local entries (except [Sync Conflict] entries) to the repo.
- * Also handles entries that were deleted locally — removes their JSON files.
+ * Also handles entries that were deleted locally — removes their files.
+ * Cleans up redirect markers left by title renames.
  */
 
 import { existsSync } from 'node:fs';
@@ -13,7 +14,7 @@ import {
   updateLinkSyncedAt,
 } from '../db/queries.js';
 import { getDb } from '../db/connection.js';
-import { entryToJSON, linkToJSON } from './serialize.js';
+import { entryToJSON, entryToMarkdown, linkToJSON, id8 } from './serialize.js';
 import {
   ensureRepoStructure,
   writeEntryFile,
@@ -24,6 +25,7 @@ import {
   deleteLinkFile,
   getRepoEntryIds,
   getRepoLinkIds,
+  cleanupRedirectFiles,
 } from './fs.js';
 import { resolveRepoForScope } from './routing.js';
 import { gitCommitAll, gitPush } from './git.js';
@@ -60,7 +62,7 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
   // === Push entries ===
 
   const localEntries = getAllEntries();
-  const localEntryIds = new Set<string>();
+  const localEntryId8s = new Set<string>();
 
   // Track which repo each entry belongs to (for deletion logic)
   const entryRepoMap = new Map<string, string>();
@@ -73,7 +75,7 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
       // Skip conflict entries — they're local-only resolution artifacts
       if (entry.title.startsWith('[Sync Conflict]')) continue;
 
-      localEntryIds.add(entry.id);
+      localEntryId8s.add(id8(entry.id));
 
       // Resolve target repo
       const targetRepo = resolveRepoForScope(entry.scope, entry.project, config);
@@ -84,8 +86,8 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
       // This prevents spurious git commits when the entry hasn't actually changed
       // (e.g., after a pull→push cycle where only local metadata like access_count changed).
       const json = entryToJSON(entry);
-      const serialized = JSON.stringify(json, null, 2) + '\n';
-      const existing = readEntryFileRaw(repoPath, entry.type, entry.id);
+      const serialized = entryToMarkdown(json);
+      const existing = readEntryFileRaw(repoPath, entry.type, entry.id, entry.title);
 
       if (existing === serialized) {
         // File is byte-identical — skip write, just update synced_version
@@ -112,23 +114,35 @@ export async function push(config: import('./routing.js').SyncConfig): Promise<P
   for (const repo of config.repos) {
     if (!existsSync(repo.path)) continue;
 
+    // getRepoEntryIds returns 8-char prefixes
     const repoIds = getRepoEntryIds(repo.path);
-    for (const id of repoIds) {
+    for (const id8Prefix of repoIds) {
       // If entry no longer exists locally, delete it
-      if (!localEntryIds.has(id)) {
-        deleteEntryFile(repo.path, id);
+      if (!localEntryId8s.has(id8Prefix)) {
+        // We need to find and delete by ID prefix — deleteEntryFile uses findEntryFile
+        // which matches on the suffix. We need to construct a fake full ID with the prefix.
+        // Since deleteEntryFile uses id8() internally, any ID starting with this prefix works.
+        deleteEntryFile(repo.path, id8Prefix);
         result.deleted++;
         touchedRepos.add(repo.path);
         continue;
       }
+    }
 
-      // If entry exists locally but belongs to a DIFFERENT repo, delete it here (move)
-      const correctRepo = entryRepoMap.get(id);
-      if (correctRepo && correctRepo !== repo.path) {
-        deleteEntryFile(repo.path, id);
-        // Don't count as deleted since it's just moving
+    // Check entries that exist locally but belong to a DIFFERENT repo (move)
+    for (const [fullId, correctRepo] of entryRepoMap) {
+      if (correctRepo !== repo.path) {
+        // Try to delete from this repo — deleteEntryFile is a no-op if file isn't there
+        deleteEntryFile(repo.path, fullId);
+        // Don't count as deleted since it's just moving; mark repo as touched if file existed
         touchedRepos.add(repo.path);
       }
+    }
+
+    // Clean up redirect markers — they've served their purpose
+    const cleaned = cleanupRedirectFiles(repo.path);
+    if (cleaned > 0) {
+      touchedRepos.add(repo.path);
     }
   }
 

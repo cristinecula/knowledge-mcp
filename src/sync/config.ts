@@ -34,8 +34,11 @@ export function setSyncInProgress(value: boolean): void {
   syncInProgress = value;
 }
 
-/** Schema version for the sync repo metadata. */
-export const SYNC_SCHEMA_VERSION = 1;
+/** Schema version for the sync repo metadata.
+ * v1: JSON entry files ({uuid}.json)
+ * v2: Markdown with YAML frontmatter ({slug}_{id8}.md)
+ */
+export const SYNC_SCHEMA_VERSION = 2;
 
 /** Default lock TTL in seconds. */
 const LOCK_TTL_SECONDS = 90;

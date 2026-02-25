@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { entryFileName } from '../sync/serialize.js';
 import {
   createBareRemote,
   spawnAgent,
@@ -761,12 +762,12 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
         const companyClone = (agentA as any).clonePaths[0];
         const projectClone = (agentA as any).clonePaths[1];
 
-        expect(existsSync(join(companyClone, 'entries', 'convention', `${companyEntry.id}.json`))).toBe(true);
-        expect(existsSync(join(projectClone, 'entries', 'fact', `${projectEntry.id}.json`))).toBe(true);
+        expect(existsSync(join(companyClone, 'entries', 'convention', entryFileName('Company-wide convention', companyEntry.id as string)))).toBe(true);
+        expect(existsSync(join(projectClone, 'entries', 'fact', entryFileName('Project-specific fact', projectEntry.id as string)))).toBe(true);
 
         // Verify they're NOT in the wrong repos
-        expect(existsSync(join(projectClone, 'entries', 'convention', `${companyEntry.id}.json`))).toBe(false);
-        expect(existsSync(join(companyClone, 'entries', 'fact', `${projectEntry.id}.json`))).toBe(false);
+        expect(existsSync(join(projectClone, 'entries', 'convention', entryFileName('Company-wide convention', companyEntry.id as string)))).toBe(false);
+        expect(existsSync(join(companyClone, 'entries', 'fact', entryFileName('Project-specific fact', projectEntry.id as string)))).toBe(false);
       } finally {
         await destroyAgent(agentA);
         destroyRemote(companyRemote);
@@ -848,8 +849,8 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
         const projXClone = (agentA as any).clonePaths[0];
         const defaultClone = (agentA as any).clonePaths[1];
 
-        expect(existsSync(join(projXClone, 'entries', 'fact', `${projEntry.id}.json`))).toBe(true);
-        expect(existsSync(join(defaultClone, 'entries', 'fact', `${otherEntry.id}.json`))).toBe(true);
+        expect(existsSync(join(projXClone, 'entries', 'fact', entryFileName('X-App architecture', projEntry.id as string)))).toBe(true);
+        expect(existsSync(join(defaultClone, 'entries', 'fact', entryFileName('General note', otherEntry.id as string)))).toBe(true);
       } finally {
         await destroyAgent(agentA);
         destroyRemote(companyRemote);
@@ -1278,7 +1279,7 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
       }
     });
 
-    it('should skip malformed JSON files during pull', async () => {
+    it('should skip malformed entry files during pull', async () => {
       const remote = createBareRemote();
       try {
         // Seed remote with one valid entry and one malformed file
@@ -1287,8 +1288,8 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
           { id: validId, type: 'fact', title: 'Valid entry', content: 'good content' },
         ]);
 
-        // Add a malformed JSON file
-        seedMalformedFile(remote, 'entries/fact/bad-file.json', 'this is not valid json {{{');
+        // Add a malformed .md file (invalid YAML frontmatter)
+        seedMalformedFile(remote, 'entries/fact/bad-file_00000000.md', 'this is not valid frontmatter {{{');
 
         // Spawn agent — should import the valid entry and skip the bad one
         const agentA = await spawnAgent(remote, 'alice');
