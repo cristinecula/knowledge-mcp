@@ -6,15 +6,15 @@ Built for teams where multiple agents work across many repositories. Store conve
 
 ## Features
 
-- **Associative knowledge graph** — Link entries with typed relationships (depends, derived, elaborates, contradicts, supersedes, related). When an entry is updated, linked entries accumulate inaccuracy based on how closely they are connected.
+- **Associative knowledge graph** — Link entries with typed relationships (depends, derived, elaborates, contradicts, supersedes, related, conflicts_with). When an entry is updated, linked entries accumulate inaccuracy based on how closely they are connected.
 - **Cascade revalidation** — When a knowledge entry is updated, entries that depend on it or are derived from it are automatically flagged as "needs revalidation."
 - **Full-text search** — FTS5-powered keyword search across titles, content, and tags.
 - **Semantic search** — Optional vector similarity search using local embeddings or OpenAI. Results are merged with keyword search via Reciprocal Rank Fusion.
 - **Knowledge graph visualization** — Built-in D3.js force-directed graph UI served on `localhost:3333`.
 - **Hierarchical scoping** — Entries can be scoped to company, project, or repo. Queries inherit upward (repo queries include project and company knowledge).
-- **Git-based team sync** — Share knowledge across a team via a git repo. JSON files are the source of truth; local SQLite acts as a personal index. Conflict detection keeps both versions and lets agents resolve naturally.
+- **Git-based team sync** — Share knowledge across a team via a git repo. Markdown files with YAML frontmatter are the source of truth; local SQLite acts as a personal index. Conflict detection keeps both versions and lets agents resolve naturally.
 - **Entry version history** — When git sync is configured, inspect the full commit history of any entry and retrieve its content at any point in time.
-- **13 MCP tools** — Store, query, list, get, reinforce, deprecate, link, update, delete, sync knowledge, flag for revalidation, plus entry version history.
+- **11 MCP tools** — Store, query, get, list, reinforce, deprecate, update, delete, sync knowledge, plus entry version history.
 
 ## Installation
 
@@ -239,6 +239,9 @@ Search the knowledge base using free-text queries. Combines FTS5 keyword search 
 ### `list_knowledge`
 Browse and filter entries without a search query. Filter by type, project, scope, or status. Does not auto-reinforce.
 
+### `get_knowledge`
+Retrieve the full content of a knowledge entry by ID. Supports short ID prefixes (minimum 4 characters) — if the prefix uniquely identifies an entry, it resolves automatically. If ambiguous, returns candidate matches to help disambiguate.
+
 ### `reinforce_knowledge`
 Explicitly revalidate an entry, resetting its inaccuracy score to 0. Use this when you verify an entry is still accurate.
 
@@ -247,9 +250,6 @@ Mark an entry as deprecated. Deprecated entries are excluded from default query 
 
 ### `delete_knowledge`
 Permanently delete an entry and all its associated links and embeddings. Irreversible. Use for entries created by mistake.
-
-### `link_knowledge`
-Create typed links between entries. Supports bidirectional linking. Link types: `related`, `derived`, `depends`, `contradicts`, `supersedes`, `elaborates`.
 
 ### `update_knowledge`
 Update an entry's content, title, tags, type, project, or scope. Automatically triggers cascade revalidation on dependent entries and re-generates embeddings.
@@ -269,9 +269,9 @@ The sync layer enables team knowledge sharing via a shared git repository. Each 
 
 ### How it works
 
-- **Source of truth:** JSON files in the git repo (`entries/{type}/{id}.json`, `links/{id}.json`)
+- **Source of truth:** Markdown files in the git repo (`entries/{type}/{slug}_{id8}.md`) with YAML frontmatter containing metadata and links. No separate links directory — links are embedded in each entry's frontmatter.
 - **Local DB:** SQLite acts as a personal index/cache. Local-only fields (access count, last accessed) stay local — each person's usage is personal.
-- **Write-through:** Every local write (store, update, delete, link, deprecate) is immediately written to the repo as JSON files and committed (`git commit`).
+- **Write-through:** Every local write (store, update, delete, link, deprecate) is immediately written to the repo as Markdown files and committed (`git commit`).
 - **Pull on startup:** When the server starts, it pulls all changes from the configured repos into the local DB.
 - **Manual sync:** Use the `sync_knowledge` tool to pull/push mid-session.
 - **Auto-clone:** If a repo path is missing but has a `remote` URL, the system automatically clones it on startup.
@@ -281,10 +281,10 @@ The sync layer enables team knowledge sharing via a shared git repository. Each 
 
 When both local and remote have changed since last sync:
 
-1. The local entry is flagged as `needs_revalidation`
-2. A new `[Sync Conflict]` entry is created containing the remote version
-3. A `contradicts` link is created between the conflict entry and the original
-4. Both are flagged `needs_revalidation`
+1. The remote version wins as canonical and overwrites the local entry
+2. The local version is saved as a new `[Sync Conflict]` entry
+3. A `conflicts_with` link is created from the conflict copy to the canonical entry
+4. The conflict copy is flagged with high inaccuracy so agents know to resolve it
 5. The agent resolves naturally by reviewing both versions and keeping the correct one
 
 ### Repo structure
@@ -293,14 +293,12 @@ When both local and remote have changed since last sync:
 shared-knowledge-repo/
   entries/
     convention/
-      {id}.json
+      {slug}_{id8}.md
     decision/
-      {id}.json
+      {slug}_{id8}.md
     pattern/
-      {id}.json
+      {slug}_{id8}.md
     ...
-  links/
-    {id}.json
 ```
 
 ### Setup
@@ -319,7 +317,7 @@ node build/index.js --sync-config config.json
 
 When a knowledge entry is updated, linked entries accumulate inaccuracy based on the change magnitude and link type weights. Entries whose inaccuracy exceeds a configurable threshold are flagged as "needs revalidation." Reinforcing an entry resets its inaccuracy to 0.
 
-**Inaccuracy link type weights:** depends (0.8), derived (0.6), elaborates (0.5), supersedes (0.4), contradicts (0.3), related (0.1).
+**Inaccuracy link type weights:** derived (1.0), contradicts (0.7), depends (0.6), elaborates (0.4), supersedes (0.3), related (0.1), conflicts_with (0).
 
 **Status transitions:**
 - `active` — default status
@@ -332,7 +330,7 @@ When a knowledge entry is updated, linked entries accumulate inaccuracy based on
 - **knowledge_links** — Typed associations between entries (unique constraint on source + target + type)
 - **knowledge_embeddings** — Vector embeddings for semantic search
 
-All tables use UUID primary keys and ISO 8601 timestamps. The `content_updated_at` column tracks content changes for sync conflict detection, and `synced_at` records when an entry was last synced with the repo.
+All tables use UUID primary keys and ISO 8601 timestamps. Conflict detection uses `version` and `synced_version` columns — each content-changing operation increments `version`, and `synced_version` tracks the last version reconciled with the remote. If both local and remote have advanced beyond `synced_version`, it's a true conflict. The `synced_at` column records when an entry was last synced with the repo.
 
 ### Scoping
 
@@ -382,11 +380,11 @@ src/
   tools/
     store.ts            # store_knowledge
     query.ts            # query_knowledge
+    get.ts              # get_knowledge
     list.ts             # list_knowledge
     reinforce.ts        # reinforce_knowledge
     deprecate.ts        # deprecate_knowledge
     delete.ts           # delete_knowledge
-    link.ts             # link_knowledge
     update.ts           # update_knowledge
     sync.ts             # sync_knowledge
     history.ts          # get_entry_history, get_entry_at_version
@@ -401,6 +399,7 @@ src/
     pull.ts             # Import remote changes, handle conflicts
     push.ts             # Export local entries/links to repo
     write-through.ts    # Immediate sync on local writes
+    commit-scheduler.ts # Batched commit scheduling
   embeddings/
     provider.ts         # Embedding provider interface + factory
     local.ts            # Local provider (@xenova/transformers)
@@ -414,10 +413,13 @@ src/
     db.test.ts          # Database layer tests
     tools.test.ts       # Tool integration tests
     similarity.test.ts  # Similarity/RRF math tests
+    inaccuracy.test.ts  # Inaccuracy propagation tests
     sync.test.ts        # Sync layer tests
     e2e-sync.test.ts    # End-to-end sync tests with real git repos
     e2e-helpers.ts      # E2E test infrastructure
     history.test.ts     # Entry version history tests
+    commit-scheduler.test.ts # Commit scheduler tests
+    handler.test.ts     # Graph API handler tests
 ```
 
 ## License
