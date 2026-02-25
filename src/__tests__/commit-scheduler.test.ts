@@ -26,6 +26,9 @@ describe('commit-scheduler', () => {
     // Create a real temp git repo so gitCommitAll can work
     repoPath = mkdtempSync(join(tmpdir(), 'knowledge-mcp-commit-scheduler-'));
     gitInit(repoPath);
+    // Set git user config for CI environments where global config may not exist
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repoPath, stdio: 'ignore' });
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoPath, stdio: 'ignore' });
     ensureRepoStructure(repoPath);
     // Commit the initial structure so there's a HEAD
     gitCommitAll(repoPath, 'init');

@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { setupTestDb, teardownTestDb } from './helpers.js';
 import { getDb } from '../db/connection.js';
 import {
@@ -60,6 +61,12 @@ describe('sync layer', () => {
     // Initialize git repos
     gitInit(repoPath);
     gitInit(repoPath2);
+
+    // Set git user config for CI environments where global config may not exist
+    for (const rp of [repoPath, repoPath2]) {
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: rp, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: rp, stdio: 'ignore' });
+    }
     
     config = {
       repos: [
@@ -1792,9 +1799,11 @@ describe('sync layer', () => {
       const db = getDb();
       const now = new Date().toISOString();
       const future = new Date(Date.now() + 60_000).toISOString();
-      // Simulate another process holding the lock — use PID 1 (init, always alive)
+      // Simulate another process holding the lock — use our parent PID which is
+      // guaranteed to be alive and different from process.pid
+      const otherPid = process.ppid;
       db.prepare('INSERT INTO sync_lock (lock_name, holder_pid, acquired_at, expires_at) VALUES (?, ?, ?, ?)')
-        .run('sync', 1, now, future);
+        .run('sync', otherPid, now, future);
 
       expect(tryAcquireSyncLock()).toBe(false);
     });
