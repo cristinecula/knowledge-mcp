@@ -16,7 +16,6 @@ import {
   countKnowledge,
   insertLink,
   getLinksForEntry,
-  getLinkedEntries,
   getLinkById,
   getIncomingLinks,
   getOutgoingLinks,
@@ -1006,7 +1005,7 @@ describe('inaccuracy revalidation warnings', () => {
   }
 
   it('should produce a warning when query results include high-inaccuracy entries', () => {
-    const a = insertKnowledge({ type: 'fact', title: 'Accurate fact', content: 'Content about alpha' });
+    insertKnowledge({ type: 'fact', title: 'Accurate fact', content: 'Content about alpha' });
     const b = insertKnowledge({ type: 'fact', title: 'Stale fact', content: 'Content about alpha' });
     setInaccuracy(b.id, INACCURACY_THRESHOLD + 0.5);
 

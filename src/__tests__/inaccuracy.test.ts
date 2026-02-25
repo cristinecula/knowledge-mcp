@@ -14,10 +14,7 @@ import {
 } from '../db/queries.js';
 import {
   INACCURACY_THRESHOLD,
-  INACCURACY_HOP_DECAY,
   INACCURACY_CAP,
-  INACCURACY_FLOOR,
-  INACCURACY_LINK_WEIGHTS,
 } from '../types.js';
 
 beforeEach(() => {
@@ -518,7 +515,7 @@ describe('search and count with inaccuracy filters', () => {
 
   it('should support above_threshold in search', () => {
     const a = insertKnowledge({ type: 'fact', title: 'Alpha search term', content: 'Content' });
-    const b = insertKnowledge({ type: 'fact', title: 'Alpha another', content: 'Content' });
+    insertKnowledge({ type: 'fact', title: 'Alpha another', content: 'Content' });
     setInaccuracy(a.id, 1.5);
 
     const results = searchKnowledge({ query: 'Alpha', aboveThreshold: true });
@@ -536,7 +533,7 @@ describe('search and count with inaccuracy filters', () => {
   });
 
   it('should default to active filter (includes high-inaccuracy active entries)', () => {
-    const a = insertKnowledge({ type: 'fact', title: 'Normal', content: 'Content' });
+    insertKnowledge({ type: 'fact', title: 'Normal', content: 'Content' });
     const b = insertKnowledge({ type: 'fact', title: 'High inaccuracy but active', content: 'Content' });
     setInaccuracy(b.id, 1.5);
 

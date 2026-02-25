@@ -4,10 +4,11 @@
  * Uses temp directories for git repos and mocks/spies on gitCommitAll
  * to verify batching behavior without actual git overhead.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { gitInit, gitCommitAll } from '../sync/git.js';
 import { touchedRepos, clearTouchedRepos } from '../sync/write-through.js';
 import {
@@ -60,7 +61,6 @@ describe('commit-scheduler', () => {
 
   it('should commit touched repos on flush', () => {
     // Write a file so there's something to commit
-    const { writeFileSync } = require('node:fs');
     writeFileSync(join(repoPath, 'entries', 'fact', 'test.json'), '{}');
     touchedRepos.add(repoPath);
 
@@ -68,7 +68,6 @@ describe('commit-scheduler', () => {
     flushCommit();
 
     // Verify a commit was made
-    const { execFileSync } = require('node:child_process');
     const log = execFileSync('git', ['log', '--oneline', '-2'], {
       cwd: repoPath,
       encoding: 'utf-8',
@@ -79,7 +78,6 @@ describe('commit-scheduler', () => {
   });
 
   it('should batch multiple scheduleCommit calls into one commit', () => {
-    const { writeFileSync } = require('node:fs');
     writeFileSync(join(repoPath, 'entries', 'fact', 'test1.json'), '{"a":1}');
     touchedRepos.add(repoPath);
     scheduleCommit('first message');
@@ -96,7 +94,6 @@ describe('commit-scheduler', () => {
     flushCommit();
 
     // Should produce exactly 1 commit (not 3)
-    const { execFileSync } = require('node:child_process');
     const log = execFileSync('git', ['log', '--oneline', '-5'], {
       cwd: repoPath,
       encoding: 'utf-8',
@@ -109,7 +106,6 @@ describe('commit-scheduler', () => {
   });
 
   it('should include all messages in the batched commit body', () => {
-    const { writeFileSync } = require('node:fs');
     writeFileSync(join(repoPath, 'entries', 'fact', 'a.json'), '{"a":1}');
     touchedRepos.add(repoPath);
     scheduleCommit('msg-alpha');
@@ -118,7 +114,6 @@ describe('commit-scheduler', () => {
     flushCommit();
 
     // Check full commit message (not --oneline)
-    const { execFileSync } = require('node:child_process');
     const fullMsg = execFileSync('git', ['log', '-1', '--format=%B'], {
       cwd: repoPath,
       encoding: 'utf-8',
@@ -128,7 +123,6 @@ describe('commit-scheduler', () => {
   });
 
   it('should auto-commit after debounce window', async () => {
-    const { writeFileSync } = require('node:fs');
     writeFileSync(join(repoPath, 'entries', 'fact', 'auto.json'), '{"auto":true}');
     touchedRepos.add(repoPath);
 
@@ -140,7 +134,6 @@ describe('commit-scheduler', () => {
     expect(hasPendingCommit()).toBe(false);
 
     // Verify commit was made
-    const { execFileSync } = require('node:child_process');
     const log = execFileSync('git', ['log', '--oneline', '-2'], {
       cwd: repoPath,
       encoding: 'utf-8',
@@ -164,7 +157,6 @@ describe('commit-scheduler', () => {
   });
 
   it('should clear touchedRepos after committing', () => {
-    const { writeFileSync } = require('node:fs');
     writeFileSync(join(repoPath, 'entries', 'fact', 'clear.json'), '{}');
     touchedRepos.add(repoPath);
 
@@ -175,8 +167,6 @@ describe('commit-scheduler', () => {
   });
 
   it('should reset debounce timer on each scheduleCommit call', async () => {
-    const { writeFileSync } = require('node:fs');
-
     // First call starts the timer
     writeFileSync(join(repoPath, 'entries', 'fact', 'reset1.json'), '{"r":1}');
     touchedRepos.add(repoPath);
@@ -199,7 +189,6 @@ describe('commit-scheduler', () => {
 
     expect(hasPendingCommit()).toBe(false);
 
-    const { execFileSync } = require('node:child_process');
     const log = execFileSync('git', ['log', '--oneline', '-5'], {
       cwd: repoPath,
       encoding: 'utf-8',
