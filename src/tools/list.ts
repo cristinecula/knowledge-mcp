@@ -10,7 +10,10 @@ export function registerListTool(server: McpServer): void {
       description:
         'Browse and filter knowledge entries without a text search query. ' +
         'Use this to see what knowledge exists by type, project, scope, or status. ' +
-        'Unlike query_knowledge, this does NOT auto-reinforce entries.',
+        'Unlike query_knowledge, this does NOT auto-reinforce entries. ' +
+        'Entries marked needs_revalidation=true may be stale due to changes in linked entries — ' +
+        'verify their accuracy before relying on them, then use `reinforce_knowledge` if still correct ' +
+        'or `update_knowledge` to fix outdated content.',
       inputSchema: {
         type: z.enum(KNOWLEDGE_TYPES).optional().describe('Filter by knowledge type'),
         project: z.string().optional().describe('Filter by project name'),
@@ -112,6 +115,17 @@ export function registerListTool(server: McpServer): void {
           }
           return result;
         });
+
+        // Check for entries needing revalidation and add guidance warnings
+        const staleEntries = results.filter((r) => r.needs_revalidation);
+        if (staleEntries.length > 0) {
+          const staleList = staleEntries.map((e) => `"${e.title}" (${e.id})`).join(', ');
+          warnings.push(
+            `${staleEntries.length} entr${staleEntries.length === 1 ? 'y' : 'ies'} may be inaccurate due to changes in linked entries: ${staleList}. ` +
+            'Verify accuracy before relying on this information. ' +
+            'Use `reinforce_knowledge` if the entry is still correct, or `update_knowledge` to fix outdated content.',
+          );
+        }
 
         const responseEnvelope: Record<string, unknown> = {
           count: results.length,
