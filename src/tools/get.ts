@@ -11,7 +11,10 @@ export function registerGetTool(server: McpServer): void {
         'Retrieve the full content of a knowledge entry by ID. ' +
         'Use this after query_knowledge or list_knowledge to read the complete content ' +
         'of an entry (search results return truncated content). ' +
-        'Accessing an entry automatically reinforces it.',
+        'Accessing an entry automatically reinforces it. ' +
+        'If the entry has needs_revalidation=true, it may be stale due to changes in linked entries — ' +
+        'verify its accuracy before relying on it, then use `reinforce_knowledge` if still correct ' +
+        'or `update_knowledge` to fix outdated content.',
       inputSchema: {
         id: z.string().describe('ID of the knowledge entry to retrieve'),
       },
@@ -66,6 +69,19 @@ export function registerGetTool(server: McpServer): void {
         }
         if (entry.flag_reason) {
           result.flag_reason = entry.flag_reason;
+        }
+
+        // Add warning if entry needs revalidation
+        const warnings: string[] = [];
+        if (entry.inaccuracy >= INACCURACY_THRESHOLD) {
+          warnings.push(
+            `This entry may be inaccurate due to changes in linked entries (inaccuracy: ${Math.round(entry.inaccuracy * 1000) / 1000}). ` +
+            'Verify accuracy before relying on this information. ' +
+            'Use `reinforce_knowledge` if the entry is still correct, or `update_knowledge` to fix outdated content.',
+          );
+        }
+        if (warnings.length > 0) {
+          result.warnings = warnings;
         }
 
         return {

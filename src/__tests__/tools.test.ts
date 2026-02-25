@@ -16,7 +16,6 @@ import {
   countKnowledge,
   insertLink,
   getLinksForEntry,
-  getLinkedEntries,
   getLinkById,
   getIncomingLinks,
   getOutgoingLinks,
@@ -979,5 +978,117 @@ describe('get knowledge workflow', () => {
     expect(full).toBeDefined();
     expect(full!.content).toBe(longContent);
     expect(full!.content.length).toBe(600);
+  });
+});
+
+// === Inaccuracy revalidation warnings ===
+
+describe('inaccuracy revalidation warnings', () => {
+  /**
+   * Simulate the warning-generation logic used by query_knowledge and list_knowledge tools.
+   * This mirrors the code in src/tools/query.ts and src/tools/list.ts.
+   */
+  function buildRevalidationWarnings(
+    entries: Array<{ id: string; title: string; inaccuracy: number }>,
+  ): string[] {
+    const warnings: string[] = [];
+    const staleEntries = entries.filter((e) => e.inaccuracy >= INACCURACY_THRESHOLD);
+    if (staleEntries.length > 0) {
+      const staleList = staleEntries.map((e) => `"${e.title}" (${e.id})`).join(', ');
+      warnings.push(
+        `${staleEntries.length} entr${staleEntries.length === 1 ? 'y' : 'ies'} may be inaccurate due to changes in linked entries: ${staleList}. ` +
+        'Verify accuracy before relying on this information. ' +
+        'Use `reinforce_knowledge` if the entry is still correct, or `update_knowledge` to fix outdated content.',
+      );
+    }
+    return warnings;
+  }
+
+  it('should produce a warning when query results include high-inaccuracy entries', () => {
+    insertKnowledge({ type: 'fact', title: 'Accurate fact', content: 'Content about alpha' });
+    const b = insertKnowledge({ type: 'fact', title: 'Stale fact', content: 'Content about alpha' });
+    setInaccuracy(b.id, INACCURACY_THRESHOLD + 0.5);
+
+    const results = searchKnowledge({ query: 'alpha' });
+    expect(results.length).toBeGreaterThanOrEqual(2);
+
+    const warnings = buildRevalidationWarnings(results);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('1 entry may be inaccurate');
+    expect(warnings[0]).toContain('Stale fact');
+    expect(warnings[0]).toContain('reinforce_knowledge');
+    expect(warnings[0]).toContain('update_knowledge');
+  });
+
+  it('should not produce a warning when all results have low inaccuracy', () => {
+    insertKnowledge({ type: 'fact', title: 'Good fact', content: 'Content about beta' });
+    insertKnowledge({ type: 'fact', title: 'Another good fact', content: 'Content about beta' });
+
+    const results = searchKnowledge({ query: 'beta' });
+    expect(results.length).toBeGreaterThanOrEqual(2);
+
+    const warnings = buildRevalidationWarnings(results);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('should list multiple stale entries in warning', () => {
+    const a = insertKnowledge({ type: 'fact', title: 'Stale A', content: 'Content about gamma' });
+    const b = insertKnowledge({ type: 'fact', title: 'Stale B', content: 'Content about gamma' });
+    setInaccuracy(a.id, INACCURACY_THRESHOLD);
+    setInaccuracy(b.id, INACCURACY_THRESHOLD + 1.0);
+
+    const results = searchKnowledge({ query: 'gamma' });
+    expect(results.length).toBeGreaterThanOrEqual(2);
+
+    const warnings = buildRevalidationWarnings(results);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('2 entries may be inaccurate');
+    expect(warnings[0]).toContain('Stale A');
+    expect(warnings[0]).toContain('Stale B');
+  });
+
+  it('should produce a warning for list results with high-inaccuracy entries', () => {
+    const a = insertKnowledge({ type: 'fact', title: 'Listed stale', content: 'Content' });
+    insertKnowledge({ type: 'fact', title: 'Listed good', content: 'Content' });
+    setInaccuracy(a.id, INACCURACY_THRESHOLD);
+
+    const results = listKnowledge({});
+    const warnings = buildRevalidationWarnings(results);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('Listed stale');
+  });
+
+  it('should produce a warning for get_knowledge when entry has high inaccuracy', () => {
+    const entry = insertKnowledge({ type: 'fact', title: 'Stale entry', content: 'Content' });
+    setInaccuracy(entry.id, INACCURACY_THRESHOLD + 0.2);
+
+    const retrieved = getKnowledgeById(entry.id)!;
+    expect(retrieved.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
+
+    // Simulate what get_knowledge tool does
+    const warnings: string[] = [];
+    if (retrieved.inaccuracy >= INACCURACY_THRESHOLD) {
+      warnings.push(
+        `This entry may be inaccurate due to changes in linked entries (inaccuracy: ${Math.round(retrieved.inaccuracy * 1000) / 1000}). ` +
+        'Verify accuracy before relying on this information. ' +
+        'Use `reinforce_knowledge` if the entry is still correct, or `update_knowledge` to fix outdated content.',
+      );
+    }
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('inaccuracy: 1.2');
+    expect(warnings[0]).toContain('reinforce_knowledge');
+  });
+
+  it('should not produce a warning for get_knowledge when entry has low inaccuracy', () => {
+    const entry = insertKnowledge({ type: 'fact', title: 'Good entry', content: 'Content' });
+
+    const retrieved = getKnowledgeById(entry.id)!;
+    expect(retrieved.inaccuracy).toBe(0);
+
+    const warnings: string[] = [];
+    if (retrieved.inaccuracy >= INACCURACY_THRESHOLD) {
+      warnings.push('should not appear');
+    }
+    expect(warnings).toHaveLength(0);
   });
 });

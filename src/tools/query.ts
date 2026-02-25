@@ -25,7 +25,10 @@ export function registerQueryTool(server: McpServer): void {
         'Results are ranked by relevance. ' +
         'Accessing knowledge automatically records the access for analytics. ' +
         'Use this to find conventions, decisions, patterns, pitfalls, and other team knowledge. ' +
-        'Content is truncated in results — use `get_knowledge` to read full entries.',
+        'Content is truncated in results — use `get_knowledge` to read full entries. ' +
+        'Entries marked needs_revalidation=true may be stale due to changes in linked entries — ' +
+        'verify their accuracy before relying on them, then use `reinforce_knowledge` if still correct ' +
+        'or `update_knowledge` to fix outdated content.',
       inputSchema: {
         query: z.string().describe('Free-text search query (searches title, content, and tags)'),
         type: z.enum(KNOWLEDGE_TYPES).optional().describe('Filter by knowledge type'),
@@ -165,6 +168,17 @@ export function registerQueryTool(server: McpServer): void {
           }
           return result;
         });
+
+        // Check for entries needing revalidation and add guidance warnings
+        const staleEntries = results.filter((r) => r.needs_revalidation);
+        if (staleEntries.length > 0) {
+          const staleList = staleEntries.map((e) => `"${e.title}" (${e.id})`).join(', ');
+          warnings.push(
+            `${staleEntries.length} entr${staleEntries.length === 1 ? 'y' : 'ies'} may be inaccurate due to changes in linked entries: ${staleList}. ` +
+            'Verify accuracy before relying on this information. ' +
+            'Use `reinforce_knowledge` if the entry is still correct, or `update_knowledge` to fix outdated content.',
+          );
+        }
 
         const responseEnvelope: Record<string, unknown> = {
           count: results.length,
