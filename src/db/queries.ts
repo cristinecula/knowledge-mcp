@@ -980,7 +980,7 @@ export function computeDiffFactor(
  */
 export function resetInaccuracy(id: string): void {
   const db = getDb();
-  db.prepare('UPDATE knowledge SET inaccuracy = 0.0 WHERE id = ?').run(id);
+  db.prepare('UPDATE knowledge SET inaccuracy = 0.0, version = version + 1 WHERE id = ?').run(id);
 }
 
 /**
@@ -990,7 +990,7 @@ export function resetInaccuracy(id: string): void {
 export function setInaccuracy(id: string, value: number): void {
   const db = getDb();
   const capped = Math.min(value, INACCURACY_CAP);
-  db.prepare('UPDATE knowledge SET inaccuracy = ? WHERE id = ?').run(capped, id);
+  db.prepare('UPDATE knowledge SET inaccuracy = ?, version = version + 1 WHERE id = ?').run(capped, id);
 }
 
 /**
@@ -1035,7 +1035,7 @@ export function propagateInaccuracy(
     'SELECT id, inaccuracy, status FROM knowledge WHERE id = ?',
   );
   const updateInaccuracyStmt = db.prepare(
-    'UPDATE knowledge SET inaccuracy = ? WHERE id = ?',
+    'UPDATE knowledge SET inaccuracy = ?, version = version + 1 WHERE id = ?',
   );
 
   while (queue.length > 0) {

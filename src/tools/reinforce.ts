@@ -6,6 +6,8 @@ import {
   resetInaccuracy,
 } from '../db/queries.js';
 import { INACCURACY_THRESHOLD } from '../types.js';
+import { syncWriteEntry } from '../sync/write-through.js';
+import { scheduleCommit } from '../sync/commit-scheduler.js';
 
 export function registerReinforceTool(server: McpServer): void {
   server.registerTool(
@@ -44,6 +46,12 @@ export function registerReinforceTool(server: McpServer): void {
         }
 
         const updated = getKnowledgeById(id)!;
+
+        // Sync the change (inaccuracy reset now bumps version)
+        if (previousInaccuracy > 0) {
+          syncWriteEntry(updated);
+          scheduleCommit(`knowledge: reinforce "${updated.title}"`);
+        }
 
         return {
           content: [
