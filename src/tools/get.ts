@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { getKnowledgeById, recordAccess, getLinksForEntry } from '../db/queries.js';
+import { getKnowledgeById, resolveKnowledgeId, recordAccess, getLinksForEntry } from '../db/queries.js';
 import { INACCURACY_THRESHOLD } from '../types.js';
 
 export function registerGetTool(server: McpServer): void {
@@ -9,6 +9,7 @@ export function registerGetTool(server: McpServer): void {
     {
       description:
         'Retrieve the full content of a knowledge entry by ID. ' +
+        'Supports short ID prefixes (minimum 4 characters) — if the prefix uniquely identifies an entry, it will be resolved automatically. ' +
         'Use this after query_knowledge or list_knowledge to read the complete content ' +
         'of an entry (search results return truncated content). ' +
         'Accessing an entry automatically reinforces it. ' +
@@ -16,12 +17,38 @@ export function registerGetTool(server: McpServer): void {
         'verify its accuracy before relying on it, then use `reinforce_knowledge` if still correct ' +
         'or `update_knowledge` to fix outdated content.',
       inputSchema: {
-        id: z.string().describe('ID of the knowledge entry to retrieve'),
+        id: z.string().describe('Full or short ID (minimum 4 characters) of the knowledge entry to retrieve'),
       },
     },
     async ({ id }) => {
       try {
-        const entry = getKnowledgeById(id);
+        // Resolve short ID prefixes to full UUIDs
+        const resolved = resolveKnowledgeId(id);
+        if (resolved === null) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Knowledge entry not found: ${id}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        if ('error' in resolved) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: resolved.error,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const resolvedId = resolved.id;
+        const entry = getKnowledgeById(resolvedId);
         if (!entry) {
           return {
             content: [
@@ -35,10 +62,10 @@ export function registerGetTool(server: McpServer): void {
         }
 
         // Auto-reinforce: bump access count
-        recordAccess(id, 1);
+        recordAccess(resolvedId, 1);
 
         // Fetch links
-        const links = getLinksForEntry(id);
+        const links = getLinksForEntry(resolvedId);
 
         const result: Record<string, unknown> = {
           id: entry.id,

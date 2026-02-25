@@ -71,6 +71,59 @@ export function getKnowledgeById(id: string): KnowledgeEntry | null {
   return row ? rowToEntry(row) : null;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MIN_PREFIX_LENGTH = 4;
+
+/**
+ * Resolve a full or partial (short) ID to a knowledge entry ID.
+ * - Full UUIDs are returned as-is (passthrough).
+ * - Short prefixes (>= 4 chars) are matched against the database.
+ * - Returns `{ id }` on unique match, `{ error }` on ambiguity or too-short prefix, or `null` if not found.
+ */
+export function resolveKnowledgeId(
+  idOrPrefix: string,
+): { id: string } | { error: string } | null {
+  // Fast path: full UUID — skip prefix search
+  if (UUID_RE.test(idOrPrefix)) {
+    return { id: idOrPrefix };
+  }
+
+  if (idOrPrefix.length < MIN_PREFIX_LENGTH) {
+    return {
+      error: `ID prefix too short: "${idOrPrefix}". Provide at least ${MIN_PREFIX_LENGTH} characters.`,
+    };
+  }
+
+  const db = getDb();
+  // Use GLOB for case-sensitive prefix matching (UUIDs are lowercase)
+  const rows = db
+    .prepare(
+      'SELECT id, title FROM knowledge WHERE id GLOB ? LIMIT 11',
+    )
+    .all(`${idOrPrefix.toLowerCase()}*`) as { id: string; title: string }[];
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  if (rows.length === 1) {
+    return { id: rows[0].id };
+  }
+
+  // Ambiguous — list matches to help user disambiguate
+  const displayed = rows.slice(0, 10);
+  const lines = displayed.map((r) => `  - ${r.id}: "${r.title}"`);
+  if (rows.length > 10) {
+    lines.push(`  ... and more`);
+  }
+  return {
+    error:
+      `Ambiguous short ID "${idOrPrefix}" — matches ${rows.length > 10 ? '10+' : rows.length} entries:\n` +
+      lines.join('\n') +
+      '\nProvide more characters to disambiguate.',
+  };
+}
+
 export function updateKnowledgeFields(
   id: string,
   fields: Partial<{

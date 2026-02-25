@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { setupTestDb, teardownTestDb } from './helpers.js';
+import { getDb } from '../db/connection.js';
 import {
   insertKnowledge,
   getKnowledgeById,
+  resolveKnowledgeId,
   updateKnowledgeFields,
   updateStatus,
   recordAccess,
@@ -97,6 +99,140 @@ describe('getKnowledgeById', () => {
   it('should return null for nonexistent ID', () => {
     const found = getKnowledgeById('nonexistent-id');
     expect(found).toBeNull();
+  });
+});
+
+describe('resolveKnowledgeId', () => {
+  it('should pass through a full UUID unchanged', () => {
+    const entry = insertKnowledge({
+      type: 'fact',
+      title: 'Test',
+      content: 'Content',
+    });
+    const result = resolveKnowledgeId(entry.id);
+    expect(result).toEqual({ id: entry.id });
+  });
+
+  it('should resolve a unique short prefix (first 8 chars)', () => {
+    const entry = insertKnowledge({
+      type: 'fact',
+      title: 'Test',
+      content: 'Content',
+    });
+    const prefix = entry.id.slice(0, 8);
+    const result = resolveKnowledgeId(prefix);
+    expect(result).toEqual({ id: entry.id });
+  });
+
+  it('should resolve a prefix with hyphens', () => {
+    const entry = insertKnowledge({
+      type: 'fact',
+      title: 'Test',
+      content: 'Content',
+    });
+    // e.g. "a33840b9-d1c0" — 13 chars including the hyphen
+    const prefix = entry.id.slice(0, 13);
+    const result = resolveKnowledgeId(prefix);
+    expect(result).toEqual({ id: entry.id });
+  });
+
+  it('should resolve a 4-character prefix', () => {
+    const entry = insertKnowledge({
+      type: 'fact',
+      title: 'Test',
+      content: 'Content',
+    });
+    const prefix = entry.id.slice(0, 4);
+    const result = resolveKnowledgeId(prefix);
+    // Should either resolve to the entry or be ambiguous — but not error for length
+    expect(result).not.toBeNull();
+    if (result && 'id' in result) {
+      expect(result.id).toBe(entry.id);
+    }
+  });
+
+  it('should return error for prefix shorter than 4 characters', () => {
+    insertKnowledge({
+      type: 'fact',
+      title: 'Test',
+      content: 'Content',
+    });
+    const result = resolveKnowledgeId('abc');
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty('error');
+    expect((result as { error: string }).error).toContain('at least 4 characters');
+  });
+
+  it('should return null for non-matching prefix', () => {
+    insertKnowledge({
+      type: 'fact',
+      title: 'Test',
+      content: 'Content',
+    });
+    const result = resolveKnowledgeId('zzzzzzzz');
+    expect(result).toBeNull();
+  });
+
+  it('should return error for ambiguous prefix', () => {
+    // Insert two entries that share the same first 8 characters
+    const db = getDb();
+    const now = new Date().toISOString();
+    // Insert two entries that share the same first 8 characters
+    db.prepare(
+      `INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, status,
+        access_count, created_at, updated_at, last_accessed_at, inaccuracy, declaration, deprecation_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'aaaa1111-0000-0000-0000-000000000001', 'fact', 'Entry One', 'Content 1',
+      '[]', null, 'company', 'test', 'active', 0, now, now, now, 0, null, null,
+    );
+    db.prepare(
+      `INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, status,
+        access_count, created_at, updated_at, last_accessed_at, inaccuracy, declaration, deprecation_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'aaaa1111-0000-0000-0000-000000000002', 'fact', 'Entry Two', 'Content 2',
+      '[]', null, 'company', 'test', 'active', 0, now, now, now, 0, null, null,
+    );
+
+    const result = resolveKnowledgeId('aaaa1111');
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty('error');
+    const error = (result as { error: string }).error;
+    expect(error).toContain('Ambiguous short ID');
+    expect(error).toContain('aaaa1111-0000-0000-0000-000000000001');
+    expect(error).toContain('aaaa1111-0000-0000-0000-000000000002');
+    expect(error).toContain('Entry One');
+    expect(error).toContain('Entry Two');
+  });
+
+  it('should resolve when a longer prefix disambiguates', () => {
+    const db = getDb();
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, status,
+        access_count, created_at, updated_at, last_accessed_at, inaccuracy, declaration, deprecation_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'bbbb2222-aaaa-0000-0000-000000000001', 'fact', 'Entry A', 'Content A',
+      '[]', null, 'company', 'test', 'active', 0, now, now, now, 0, null, null,
+    );
+    db.prepare(
+      `INSERT INTO knowledge (id, type, title, content, tags, project, scope, source, status,
+        access_count, created_at, updated_at, last_accessed_at, inaccuracy, declaration, deprecation_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'bbbb2222-bbbb-0000-0000-000000000002', 'fact', 'Entry B', 'Content B',
+      '[]', null, 'company', 'test', 'active', 0, now, now, now, 0, null, null,
+    );
+
+    // Short prefix "bbbb2222" is ambiguous
+    const ambiguous = resolveKnowledgeId('bbbb2222');
+    expect(ambiguous).toHaveProperty('error');
+
+    // Longer prefix disambiguates to Entry A
+    const resolved = resolveKnowledgeId('bbbb2222-aaaa');
+    expect(resolved).toEqual({ id: 'bbbb2222-aaaa-0000-0000-000000000001' });
   });
 });
 
