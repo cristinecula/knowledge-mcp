@@ -393,6 +393,32 @@ function drag(sim) {
 }
 
 // Sidebar
+
+window.handleFlagEntry = async function(id) {
+  const reason = prompt(
+    'Flag this entry as inaccurate.\n\nOptionally describe what is wrong (or leave blank):',
+  );
+  if (reason === null) return;
+  try {
+    const res = await fetch(`/api/entry/${encodeURIComponent(id)}/flag`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason || undefined }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    // Refresh the sidebar to show updated state
+    await showSidebar(id);
+    // Update node visual (inaccuracy changed)
+    const node = nodes.find(n => n.id === id);
+    if (node) {
+      node.inaccuracy = 1.0;
+      updateVisuals();
+    }
+  } catch (err) {
+    alert('Failed to flag entry: ' + err.message);
+  }
+}
+
 async function showSidebar(id) {
   const detail = await fetchEntryDetail(id);
   if (!detail) return;
@@ -407,10 +433,11 @@ async function showSidebar(id) {
 
   let html = `
     <h2>${escapeHtml(entry.title)}</h2>
-    <div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
       <span class="entry-type" style="background:${color}22;color:${color}">${entry.type}</span>
       <span class="status-badge status-${entry.status}">${entry.status}</span>
       ${needsRevalidation ? '<span class="status-badge status-needs_revalidation">needs revalidation</span>' : ''}
+      <button class="flag-btn" onclick="handleFlagEntry('${entry.id}')" title="Flag as inaccurate">Flag</button>
     </div>
     <div class="meta">
       <span>Scope: ${entry.scope}</span>
@@ -427,6 +454,11 @@ async function showSidebar(id) {
         <div class="inaccuracy-fill" style="width:${inaccuracyPct}%;background:${inaccuracyColor}"></div>
       </div>
     </div>
+    ${entry.flag_reason != null ? `
+      <div class="flag-banner">
+        <strong>Flagged as inaccurate</strong>${entry.flag_reason ? `: ${escapeHtml(entry.flag_reason)}` : ''}
+      </div>
+    ` : ''}
   `;
 
   if (entry.tags && entry.tags.length > 0) {

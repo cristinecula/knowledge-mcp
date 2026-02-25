@@ -216,6 +216,34 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     return;
   }
 
+  // POST /api/entry/:id/flag — flag any entry as inaccurate
+  const entryFlagMatch = pathname.match(/^\/api\/entry\/([^/]+)\/flag$/);
+  if (entryFlagMatch && req.method === 'POST') {
+    const id = decodeURIComponent(entryFlagMatch[1]);
+    const body = await parseJsonBody(req) as Record<string, unknown> | null;
+    const reason = body && typeof body.reason === 'string' && body.reason.trim()
+      ? body.reason.trim()
+      : undefined;
+
+    try {
+      const existing = getKnowledgeById(id);
+      if (!existing) {
+        sendError(res, `Entry not found: ${id}`);
+        return;
+      }
+
+      const updated = flagForRevalidation(id, reason);
+      sendJson(res, { entry: updated });
+    } catch (error) {
+      sendError(
+        res,
+        `Error flagging entry: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+      );
+    }
+    return;
+  }
+
   const entryMatch = pathname.match(/^\/api\/entry\/(.+)$/);
   if (entryMatch) {
     const id = decodeURIComponent(entryMatch[1]);
