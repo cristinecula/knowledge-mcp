@@ -356,6 +356,17 @@ svg {
   text-transform: uppercase;
 }
 
+#sidebar .link-description {
+  color: #484f58;
+  font-size: 11px;
+  font-style: italic;
+  padding: 0 8px 4px 8px;
+}
+
+#sidebar .link-description::before {
+  content: "\2014 ";
+}
+
 #sidebar .inaccuracy-bar {
   width: 100%;
   height: 6px;
