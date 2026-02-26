@@ -168,6 +168,16 @@ export async function gitPull(path: string, remote = 'origin'): Promise<boolean>
       // Use --no-rebase to merge (not rebase) and --allow-unrelated-histories
       // to handle the case where both sides created independent root commits
       // (e.g., both agents cloned an empty remote and committed independently).
+      //
+      // IMPORTANT: we intentionally do NOT use --rebase here. The application-
+      // level conflict detection in pull.ts works by comparing the on-disk file
+      // content (remote version) with the local DB. If we rebased, the local
+      // commit would be replayed on top of the remote commit, making the on-disk
+      // file match the local DB and defeating conflict detection.
+      // With --no-rebase (merge), git-level conflicts on the same file resolve
+      // by accepting --theirs (remote wins), so the on-disk file shows the
+      // remote content while the DB still has the local content — allowing
+      // detectConflict() to correctly identify the divergence.
       try {
         await execFileAsync(
           'git',
@@ -266,27 +276,41 @@ export function gitShowFile(repoPath: string, commitHash: string, relativeFilePa
   }
 }
 
-/** Push changes to remote. Skips if no remote. */
+/**
+ * Push changes to remote.
+ *
+ * Always does `pull --rebase` before pushing so the local branch is never
+ * behind the remote. This is the correct strategy for a shared single-branch
+ * sync repo used by multiple machines: if another machine pushed while we
+ * were working, the naive push would fail (rejected non-fast-forward). A
+ * `pull --rebase` replays our local commits on top of the remote commits and
+ * then the push succeeds cleanly.
+ *
+ * If the rebase itself fails (extremely rare file-level conflict) we abort and
+ * return false — the next sync cycle will retry.
+ */
 export async function gitPush(path: string, remote = 'origin'): Promise<boolean> {
   if (!hasRemote(path, remote)) return false;
+  if (!hasLocalCommits(path)) return false;
 
   try {
-    // Try simple push first
+    // Pull --rebase before pushing so we are never behind the remote.
+    // Uses the configured upstream tracking ref (set by clone or a prior push -u).
+    // On a brand-new repo that has never been pushed the pull will fail (no
+    // upstream yet) — we abort any in-progress rebase and fall through to the
+    // push, which sets the upstream via -u so future pulls work.
     try {
-      await execFileAsync('git', ['push', remote], { cwd: path });
+      await execFileAsync('git', ['pull', '--rebase', remote], { cwd: path });
     } catch {
-      // If fails (e.g., first push), try setting upstream
-      const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
-        cwd: path,
-        encoding: 'utf-8',
-      });
-      const currentBranch = stdout.trim();
-      if (currentBranch) {
-        await execFileAsync('git', ['push', '-u', remote, currentBranch], { cwd: path });
-      } else {
-        throw new Error('Could not determine current branch');
+      try {
+        execFileSync('git', ['rebase', '--abort'], { cwd: path, stdio: 'ignore' });
+      } catch {
+        // No rebase in progress — that's fine
       }
     }
+
+    // -u sets/confirms the upstream tracking ref; idempotent if already set.
+    await execFileAsync('git', ['push', '-u', remote], { cwd: path });
     return true;
   } catch (error) {
     console.error(`Git push failed for ${path}:`, error);

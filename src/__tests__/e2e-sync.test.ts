@@ -1378,6 +1378,138 @@ describe.concurrent('e2e sync', { timeout: TEST_TIMEOUT }, () => {
   });
 
   // =====================================================================
+  // 9b. Push while behind remote
+  // =====================================================================
+  describe('push while behind remote', () => {
+    it('should push successfully when remote has new commits from another agent', async () => {
+      // This is the real-world scenario from the bug report:
+      // Agent A pushes → Agent B creates local entries but never pushes →
+      // Agent B calls sync push → old code: push silently fails (rejected non-fast-forward)
+      //                         → new code: pull --rebase then push succeeds
+      const remote = createBareRemote();
+      const agentA = await spawnAgent(remote, 'alice');
+      const agentB = await spawnAgent(remote, 'bob');
+      try {
+        // Agent A stores an entry and pushes — remote now has A's commit
+        const entryA = await storeEntry(agentA, {
+          title: 'Alice ahead entry',
+          content: 'Alice pushed this before Bob',
+          type: 'fact',
+        });
+        await syncAgent(agentA, 'push');
+
+        // Agent B stores an entry locally but does NOT pull first
+        const entryB = await storeEntry(agentB, {
+          title: 'Bob behind entry',
+          content: 'Bob created this while behind remote',
+          type: 'fact',
+        });
+
+        // Agent B pushes directly (without pulling) — this should succeed
+        // because gitPush now does pull --rebase before pushing.
+        // Note: the git-level rebase brings Alice's files into B's repo, but
+        // the app-level import into SQLite only happens on an explicit pull.
+        const pushResult = await syncAgent(agentB, 'push');
+        expect(pushResult.pushed).toBeTruthy();
+
+        // Agent A pulls — must see Bob's entry (the key assertion: B's push succeeded)
+        await syncAgent(agentA, 'pull');
+        const resultsA = await queryEntries(agentA, 'Bob behind entry');
+        expect(resultsA.results.find((r) => r.id === entryB.id)).toBeTruthy();
+
+        // Agent B explicitly pulls to import Alice's entry into its DB
+        await syncAgent(agentB, 'pull');
+        const resultsB = await queryEntries(agentB, 'Alice ahead entry');
+        expect(resultsB.results.find((r) => r.id === entryA.id)).toBeTruthy();
+      } finally {
+        await destroyAgent(agentA);
+        await destroyAgent(agentB);
+        destroyRemote(remote);
+      }
+    });
+
+    it('should propagate all entries when pushing after multiple remote commits', async () => {
+      // A pushes 3 commits, B creates 3 local entries, B pushes without pulling.
+      // All 6 entries should end up on the remote.
+      const remote = createBareRemote();
+      const agentA = await spawnAgent(remote, 'alice');
+      const agentB = await spawnAgent(remote, 'bob');
+      try {
+        // Agent A pushes multiple entries
+        const a1 = await storeEntry(agentA, { title: 'Remote entry 1', content: 'r1' });
+        const a2 = await storeEntry(agentA, { title: 'Remote entry 2', content: 'r2' });
+        const a3 = await storeEntry(agentA, { title: 'Remote entry 3', content: 'r3' });
+        await syncAgent(agentA, 'push');
+
+        // Agent B creates local entries without ever pulling
+        const b1 = await storeEntry(agentB, { title: 'Local entry 1', content: 'l1' });
+        const b2 = await storeEntry(agentB, { title: 'Local entry 2', content: 'l2' });
+        const b3 = await storeEntry(agentB, { title: 'Local entry 3', content: 'l3' });
+
+        // B pushes — should succeed despite being behind
+        const pushResult = await syncAgent(agentB, 'push');
+        expect(pushResult.pushed).toBeTruthy();
+
+        // Spawn a third agent to verify the remote has all 6 entries
+        const agentC = await spawnAgent(remote, 'charlie');
+        try {
+          await syncAgent(agentC, 'pull');
+
+          for (const entry of [a1, a2, a3]) {
+            const results = await queryEntries(agentC, entry.title as string);
+            expect(results.results.find((r) => r.id === entry.id)).toBeTruthy();
+          }
+          for (const entry of [b1, b2, b3]) {
+            const results = await queryEntries(agentC, entry.title as string);
+            expect(results.results.find((r) => r.id === entry.id)).toBeTruthy();
+          }
+        } finally {
+          await destroyAgent(agentC);
+        }
+      } finally {
+        await destroyAgent(agentA);
+        await destroyAgent(agentB);
+        destroyRemote(remote);
+      }
+    });
+
+    it('should handle three agents pushing in sequence without any pulling first', async () => {
+      // A pushes, B pushes (behind A), C pushes (behind A+B) — all should succeed.
+      const remote = createBareRemote();
+      const agentA = await spawnAgent(remote, 'alice');
+      const agentB = await spawnAgent(remote, 'bob');
+      const agentC = await spawnAgent(remote, 'charlie');
+      try {
+        const entryA = await storeEntry(agentA, { title: 'Three-way A', content: 'from alice' });
+        await syncAgent(agentA, 'push');
+
+        const entryB = await storeEntry(agentB, { title: 'Three-way B', content: 'from bob' });
+        await syncAgent(agentB, 'push'); // B is behind A — should rebase and push
+
+        const entryC = await storeEntry(agentC, { title: 'Three-way C', content: 'from charlie' });
+        await syncAgent(agentC, 'push'); // C is behind A+B — should rebase and push
+
+        // Spawn a fourth agent to verify all three entries are on the remote
+        const agentD = await spawnAgent(remote, 'dave');
+        try {
+          await syncAgent(agentD, 'pull');
+          for (const entry of [entryA, entryB, entryC]) {
+            const results = await queryEntries(agentD, entry.title as string);
+            expect(results.results.find((r) => r.id === entry.id)).toBeTruthy();
+          }
+        } finally {
+          await destroyAgent(agentD);
+        }
+      } finally {
+        await destroyAgent(agentA);
+        await destroyAgent(agentB);
+        await destroyAgent(agentC);
+        destroyRemote(remote);
+      }
+    });
+  });
+
+  // =====================================================================
   // 9. Periodic automatic sync
   // =====================================================================
   describe('periodic automatic sync', () => {
