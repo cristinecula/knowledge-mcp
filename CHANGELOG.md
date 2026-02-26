@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/cristinecula/knowledge-mcp/compare/v1.1.0...v1.1.1) (2026-02-26)
+
+
+### Bug Fixes
+
+* upgrade better-sqlite3 from v11 to v12.6.2 ([6386e05](https://github.com/cristinecula/knowledge-mcp/commit/6386e05dc60b4d4681963200ec8563f3791391b0))
+
 # [1.1.0](https://github.com/cristinecula/knowledge-mcp/compare/v1.0.0...v1.1.0) (2026-02-26)
 
 
