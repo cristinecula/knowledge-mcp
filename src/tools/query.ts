@@ -155,6 +155,7 @@ export function registerQueryTool(server: McpServer): void {
               linked_entry_id: l.source_id === entry.id ? l.target_id : l.source_id,
               link_type: l.link_type,
               direction: l.source_id === entry.id ? 'outgoing' : 'incoming',
+              ...(l.description ? { description: l.description } : {}),
             })),
           };
           if (entry.declaration) {

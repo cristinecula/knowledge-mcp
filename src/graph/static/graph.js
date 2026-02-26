@@ -483,6 +483,9 @@ async function showSidebar(id) {
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${otherId.slice(0, 8)}...</span>
         </div>
       `;
+      if (link.description) {
+        html += `<div class="link-description">${escapeHtml(link.description)}</div>`;
+      }
     }
     html += '</div>';
   }
