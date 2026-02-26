@@ -27,7 +27,6 @@ import {
   storeEmbedding,
   getEmbedding,
   flagForRevalidation,
-  updateKnowledgeContent,
   setInaccuracy,
   resetInaccuracy,
   propagateInaccuracy,
@@ -869,18 +868,23 @@ describe('flag_reason workflow', () => {
     expect(flagged!.inaccuracy).toBeGreaterThanOrEqual(INACCURACY_THRESHOLD);
     expect(flagged!.flag_reason).toBe('Numbers are outdated');
 
-    // Simulate what update.ts does: update content, reset inaccuracy, clear flag_reason
+    const versionBeforeUpdate = getKnowledgeById(entry.id)!.version;
+
+    // Simulate what update.ts does: update content and clear flag_reason atomically
     updateKnowledgeFields(entry.id, {
       content: 'Updated content with fresh numbers',
+      flag_reason: null,
     });
     resetInaccuracy(entry.id);
-    updateKnowledgeContent(entry.id, { flag_reason: null });
 
     const updated = getKnowledgeById(entry.id)!;
     expect(updated.status).toBe('active');
     expect(updated.inaccuracy).toBe(0);
     expect(updated.flag_reason).toBeNull();
     expect(updated.content).toBe('Updated content with fresh numbers');
+    // Version should bump exactly twice: once for content change, once for resetInaccuracy
+    // (flag_reason clearing is NOT a content change and does not bump version)
+    expect(updated.version).toBe(versionBeforeUpdate + 2);
   });
 
   it('should show flag_reason in search results when set', () => {

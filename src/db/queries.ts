@@ -135,6 +135,7 @@ export function updateKnowledgeFields(
     scope: Scope;
     declaration: string | null;
     parentPageId: string | null;
+    flag_reason: string | null;
   }>,
 ): KnowledgeEntry | null {
   const db = getDb();
@@ -192,6 +193,10 @@ export function updateKnowledgeFields(
   if (fields.parentPageId !== undefined) {
     sets.push('parent_page_id = ?');
     values.push(fields.parentPageId);
+  }
+  if (fields.flag_reason !== undefined) {
+    sets.push('flag_reason = ?');
+    values.push(fields.flag_reason);
   }
 
   values.push(id);

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { updateKnowledgeFields, getKnowledgeById, getOutgoingLinks, getLinksForEntry, updateKnowledgeContent, resetInaccuracy, computeDiffFactor, propagateInaccuracy, flagSupersededEntries, insertLink, deleteLink } from '../db/queries.js';
+import { updateKnowledgeFields, getKnowledgeById, getOutgoingLinks, getLinksForEntry, resetInaccuracy, computeDiffFactor, propagateInaccuracy, flagSupersededEntries, insertLink, deleteLink } from '../db/queries.js';
 import { syncWriteEntry, syncWriteEntryWithLinks, scheduleCommit } from '../sync/index.js';
 import { KNOWLEDGE_TYPES, SCOPES, LINK_TYPES, INACCURACY_THRESHOLD } from '../types.js';
 import type { LinkType } from '../types.js';
@@ -66,16 +66,14 @@ export function registerUpdateTool(server: McpServer): void {
           type,
           project,
           scope,
+          // Clear any human flag_reason atomically with the content update
+          ...(oldEntry.flag_reason ? { flag_reason: null } : {}),
         });
 
         if (updated) {
           // Reset inaccuracy — updating the entry IS revalidation
           if (oldEntry.inaccuracy > 0) {
             resetInaccuracy(id);
-          }
-          // Clear any human flag_reason since the agent has now addressed it
-          if (oldEntry.flag_reason) {
-            updateKnowledgeContent(id, { flag_reason: null });
           }
 
           syncWriteEntry(updated, oldEntry.type, oldEntry.scope, oldEntry.project);
