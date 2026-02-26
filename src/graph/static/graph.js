@@ -409,7 +409,7 @@ window.handleFlagEntry = async function(id) {
     // Refresh the sidebar to show updated state
     await showSidebar(id);
     // Update node visual (inaccuracy changed)
-    const node = nodes.find(n => n.id === id);
+    const node = simulation?.nodes().find(n => n.id === id);
     if (node) {
       node.inaccuracy = 1.0;
       updateVisuals();
