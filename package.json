@@ -17,8 +17,17 @@
     "test:watch": "vitest"
   },
   "files": [
-    "build"
+    "build",
+    "!build/__tests__"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cristinecula/knowledge-mcp.git"
+  },
+  "homepage": "https://github.com/cristinecula/knowledge-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/cristinecula/knowledge-mcp/issues"
+  },
   "keywords": [
     "mcp",
     "knowledge",

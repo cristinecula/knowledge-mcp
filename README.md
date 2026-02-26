@@ -28,6 +28,19 @@ Built for teams where multiple agents work across many repositories. Store conve
   - **Linux (Fedora):** `sudo dnf install gcc-c++ make python3`
   - **Windows:** [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload
 
+### From npm (recommended)
+
+```bash
+npm install -g knowledge-mcp
+knowledge-mcp --help
+```
+
+Or use directly with `npx` — no global install needed:
+
+```bash
+npx knowledge-mcp --help
+```
+
 ### From source
 
 ```bash
@@ -43,15 +56,6 @@ Verify the installation:
 node build/index.js --help
 ```
 
-### As a CLI tool
-
-To make the `knowledge-mcp` command available globally:
-
-```bash
-npm link
-knowledge-mcp --help
-```
-
 ### Quick start
 
 1. Add to your MCP client config (see [Configuration](#configuration) for full details).
@@ -63,7 +67,7 @@ knowledge-mcp --help
      "knowledge": {
        "type": "local",
        "command": [
-         "node", "/path/to/knowledge-mcp/build/index.js",
+         "npx", "knowledge-mcp",
          "--sync-repo", "/path/to/shared-knowledge-repo"
        ],
        "enabled": true
@@ -79,7 +83,7 @@ knowledge-mcp --help
    {
      "knowledge": {
        "type": "local",
-       "command": ["node", "/path/to/knowledge-mcp/build/index.js"],
+       "command": ["npx", "knowledge-mcp"],
        "enabled": true
      }
    }
@@ -133,8 +137,8 @@ Add to your MCP client configuration (e.g., Claude Desktop `claude_desktop_confi
   "knowledge": {
     "type": "local",
     "command": [
-      "node",
-      "/path/to/knowledge-mcp/build/index.js"
+      "npx",
+      "knowledge-mcp"
     ],
     "enabled": true
   }
@@ -148,8 +152,8 @@ With git sync enabled:
   "knowledge": {
     "type": "local",
     "command": [
-      "node",
-      "/path/to/knowledge-mcp/build/index.js",
+      "npx",
+      "knowledge-mcp",
       "--sync-repo",
       "/path/to/shared-knowledge-repo"
     ],
@@ -165,8 +169,8 @@ With semantic search enabled (local embeddings):
   "knowledge": {
     "type": "local",
     "command": [
-      "node",
-      "/path/to/knowledge-mcp/build/index.js",
+      "npx",
+      "knowledge-mcp",
       "--embedding-provider",
       "local"
     ],
