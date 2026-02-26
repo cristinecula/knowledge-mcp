@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/cristinecula/knowledge-mcp/compare/v1.0.0...v1.1.0) (2026-02-26)
+
+
+### Features
+
+* surface link descriptions in graph sidebar and MCP tool responses ([#3](https://github.com/cristinecula/knowledge-mcp/issues/3)) ([9dab1c7](https://github.com/cristinecula/knowledge-mcp/commit/9dab1c7f0e8cff97fdde9ec60e58c385af61ea82))
+
 # 1.0.0 (2026-02-26)
 
 
