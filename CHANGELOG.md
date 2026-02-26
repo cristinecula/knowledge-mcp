@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/cristinecula/knowledge-mcp/compare/v1.1.1...v1.1.2) (2026-02-26)
+
+
+### Bug Fixes
+
+* **sync:** use pull --rebase before push to handle diverged remotes ([#4](https://github.com/cristinecula/knowledge-mcp/issues/4)) ([4a6d632](https://github.com/cristinecula/knowledge-mcp/commit/4a6d632a60221a2d90443de91fcd3dca96f2d919))
+
 ## [1.1.1](https://github.com/cristinecula/knowledge-mcp/compare/v1.1.0...v1.1.1) (2026-02-26)
 
 
