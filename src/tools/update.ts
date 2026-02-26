@@ -72,10 +72,10 @@ export function registerUpdateTool(server: McpServer): void {
           // Reset inaccuracy — updating the entry IS revalidation
           if (oldEntry.inaccuracy > 0) {
             resetInaccuracy(id);
-            // Clear any human flag_reason since the agent has now addressed it
-            if (oldEntry.flag_reason) {
-              updateKnowledgeContent(id, { flag_reason: null });
-            }
+          }
+          // Clear any human flag_reason since the agent has now addressed it
+          if (oldEntry.flag_reason) {
+            updateKnowledgeContent(id, { flag_reason: null });
           }
 
           syncWriteEntry(updated, oldEntry.type, oldEntry.scope, oldEntry.project);
