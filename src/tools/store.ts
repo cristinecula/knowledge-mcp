@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { insertKnowledge, insertLink, flagSupersededEntries, getKnowledgeById } from '../db/queries.js';
 import { syncWriteEntry, syncWriteEntryWithLinks, scheduleCommit } from '../sync/index.js';
-import { KNOWLEDGE_TYPES, LINK_TYPES, SCOPES, INACCURACY_THRESHOLD } from '../types.js';
+import { KNOWLEDGE_TYPES, LINK_TYPES, SCOPES } from '../types.js';
 import type { LinkType } from '../types.js';
 import { embedAndStore } from '../embeddings/similarity.js';
 
