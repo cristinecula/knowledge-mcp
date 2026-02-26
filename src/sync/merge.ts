@@ -77,7 +77,7 @@ export function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean
   return (
     local.type === remote.type &&
     local.title === remote.title &&
-    local.content === remote.content &&
+    local.content.trimEnd() === remote.content.trimEnd() &&
     local.scope === remote.scope &&
     local.source === remote.source &&
     local.status === remote.status &&

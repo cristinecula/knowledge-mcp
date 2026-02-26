@@ -973,7 +973,7 @@ describe('get knowledge workflow', () => {
 
     const retrieved = getKnowledgeById(entry.id);
     expect(retrieved).toBeDefined();
-    expect(retrieved!.content).toBe(longContent);
+    expect(retrieved!.content).toBe(longContent.trimEnd());
     expect(retrieved!.title).toBe('Detailed entry');
     expect(retrieved!.type).toBe('fact');
   });
@@ -1014,8 +1014,8 @@ describe('get knowledge workflow', () => {
     // But getKnowledgeById returns full content
     const full = getKnowledgeById(entry.id);
     expect(full).toBeDefined();
-    expect(full!.content).toBe(longContent);
-    expect(full!.content.length).toBe(600);
+    expect(full!.content).toBe(longContent.trimEnd());
+    expect(full!.content.length).toBe(longContent.trimEnd().length);
   });
 });
 

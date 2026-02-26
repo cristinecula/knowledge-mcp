@@ -44,6 +44,7 @@ import {
 } from '../sync/index.js';
 import { gitInit, gitCommitAll, isGitRepo } from '../sync/git.js';
 import { entryFileName, entryToMarkdown, parseEntryMarkdown, type EntryJSON } from '../sync/serialize.js';
+import { contentEquals } from '../sync/merge.js';
 import type { SyncConfig } from '../sync/routing.js';
 
 describe('sync layer', () => {
@@ -1767,6 +1768,147 @@ describe('sync layer', () => {
       expect(fileContent).not.toBeNull();
       const parsed = parseEntryMarkdown(fileContent!);
       expect(parsed.content).toBe('Updated content');
+    });
+  });
+
+  describe('trailing newline normalization', () => {
+    it('entryToMarkdown produces identical output regardless of trailing newlines in content', () => {
+      const base: EntryJSON = {
+        id: '00000000-0000-4000-a000-000000000100',
+        type: 'fact',
+        title: 'Trailing newline test',
+        content: 'Some content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: '2025-01-01T00:00:00.000Z',
+        version: 1,
+      };
+
+      const withTrailing = { ...base, content: 'Some content\n' };
+      const withDoubleTrailing = { ...base, content: 'Some content\n\n' };
+      const withSpaces = { ...base, content: 'Some content   \n' };
+
+      const expected = entryToMarkdown(base);
+      expect(entryToMarkdown(withTrailing)).toBe(expected);
+      expect(entryToMarkdown(withDoubleTrailing)).toBe(expected);
+      expect(entryToMarkdown(withSpaces)).toBe(expected);
+    });
+
+    it('serialize→parse→serialize roundtrip is byte-stable with trailing newlines', () => {
+      const entry: EntryJSON = {
+        id: '00000000-0000-4000-a000-000000000101',
+        type: 'fact',
+        title: 'Roundtrip newline test',
+        content: 'Content with trailing newline\n',
+        tags: ['test'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: '2025-01-01T00:00:00.000Z',
+        version: 1,
+      };
+
+      // First serialization
+      const markdown1 = entryToMarkdown(entry);
+      // Parse it back
+      const parsed = parseEntryMarkdown(markdown1);
+      // Re-serialize — should be identical
+      const reparsedEntry = { ...entry, content: parsed.content };
+      const markdown2 = entryToMarkdown(reparsedEntry);
+      expect(markdown2).toBe(markdown1);
+
+      // Third roundtrip to be sure there's no drift
+      const parsed2 = parseEntryMarkdown(markdown2);
+      const markdown3 = entryToMarkdown({ ...entry, content: parsed2.content });
+      expect(markdown3).toBe(markdown1);
+    });
+
+    it('contentEquals treats content differing only in trailing whitespace as equal', () => {
+      const local = insertKnowledge({
+        type: 'fact',
+        title: 'Content equals test',
+        content: 'Same content',
+      });
+
+      const remote: EntryJSON = {
+        id: local.id,
+        type: 'fact',
+        title: 'Content equals test',
+        content: 'Same content\n',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: local.source,
+        status: 'active',
+        created_at: local.created_at,
+        version: local.version,
+      };
+
+      expect(contentEquals(local, remote)).toBe(true);
+
+      // Also with double trailing newline
+      remote.content = 'Same content\n\n';
+      expect(contentEquals(local, remote)).toBe(true);
+
+      // Different actual content should NOT be equal
+      remote.content = 'Different content';
+      expect(contentEquals(local, remote)).toBe(false);
+    });
+
+    it('push produces no commit when DB content has trailing newline but file does not', async () => {
+      // Insert with content that will be trimmed by the DB write path
+      const entry = insertKnowledge({
+        type: 'fact',
+        title: 'Push trailing newline test',
+        content: 'Push test content\n',
+      });
+
+      // DB should have trimmed the trailing newline
+      const dbEntry = getKnowledgeById(entry.id);
+      expect(dbEntry!.content).toBe('Push test content');
+
+      // First push — creates the file
+      await push(config);
+      gitCommitAll(repoPath, 'initial push');
+
+      // Second push — should NOT produce changes even if we somehow
+      // had a trailing newline difference
+      await push(config);
+      const committed = gitCommitAll(repoPath, 'should be empty');
+      expect(committed).toBe(false);
+    });
+
+    it('pull→push roundtrip is stable when remote content has trailing newline', async () => {
+      const remoteId = '00000000-0000-4000-a000-000000000102';
+      const remoteJSON: EntryJSON = {
+        id: remoteId,
+        type: 'fact',
+        title: 'Pull trailing newline test',
+        content: 'Remote content\n',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        created_at: '2025-01-01T00:00:00.000Z',
+        version: 1,
+      };
+      ensureRepoStructure(repoPath);
+      writeEntryFile(repoPath, remoteJSON);
+      gitCommitAll(repoPath, 'add remote entry with trailing newline');
+
+      // Pull imports the entry
+      const pullResult = await pull(config);
+      expect(pullResult.new_entries).toBe(1);
+
+      // Push should NOT produce any file changes
+      await push(config);
+      const committed = gitCommitAll(repoPath, 'should be empty after pull-push');
+      expect(committed).toBe(false);
     });
   });
 

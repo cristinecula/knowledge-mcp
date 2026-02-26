@@ -427,7 +427,7 @@ export function entryToMarkdown(entry: EntryJSON): string {
     });
   }
 
-  return matter.stringify(entry.content + '\n', fm);
+  return matter.stringify(entry.content.trimEnd() + '\n', fm);
 }
 
 /**

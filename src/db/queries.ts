@@ -46,7 +46,7 @@ export function insertKnowledge(params: InsertKnowledgeParams): KnowledgeEntry {
     id,
     params.type,
     params.title,
-    params.content,
+    params.content.trimEnd(),
     JSON.stringify(params.tags ?? []),
     params.project ?? null,
     params.scope ?? 'company',
@@ -168,7 +168,7 @@ export function updateKnowledgeFields(
   }
   if (fields.content !== undefined) {
     sets.push('content = ?');
-    values.push(fields.content);
+    values.push(fields.content.trimEnd());
   }
   if (fields.tags !== undefined) {
     sets.push('tags = ?');
@@ -826,7 +826,7 @@ export function importKnowledge(params: ImportKnowledgeParams): KnowledgeEntry {
     params.id,
     params.type,
     params.title,
-    params.content,
+    params.content.trimEnd(),
     JSON.stringify(params.tags ?? []),
     params.project ?? null,
     params.scope ?? 'company',
@@ -930,7 +930,7 @@ export function updateKnowledgeContent(
   }
   if (fields.content !== undefined) {
     sets.push('content = ?');
-    values.push(fields.content);
+    values.push(fields.content.trimEnd());
   }
   if (fields.tags !== undefined) {
     sets.push('tags = ?');
