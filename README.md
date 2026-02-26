@@ -271,9 +271,9 @@ The sync layer enables team knowledge sharing via a shared git repository. Each 
 
 - **Source of truth:** Markdown files in the git repo (`entries/{type}/{slug}_{id8}.md`) with YAML frontmatter containing metadata and links. No separate links directory — links are embedded in each entry's frontmatter.
 - **Local DB:** SQLite acts as a personal index/cache. Local-only fields (access count, last accessed) stay local — each person's usage is personal.
-- **Write-through:** Every local write (store, update, delete, link, deprecate) is immediately written to the repo as Markdown files and committed (`git commit`).
+- **Write-through:** Every local write (store, update, delete, link, deprecate) is immediately written to the repo as Markdown files and committed locally. Rapid writes are batched into a single commit (150ms debounce). Push to remote happens automatically on the sync interval (default 5 minutes) or on demand via the `sync_knowledge` tool.
 - **Pull on startup:** When the server starts, it pulls all changes from the configured repos into the local DB.
-- **Manual sync:** Use the `sync_knowledge` tool to pull/push mid-session.
+- **Manual sync:** Use the `sync_knowledge` tool to pull/push mid-session (e.g. to immediately share a just-stored entry).
 - **Auto-clone:** If a repo path is missing but has a `remote` URL, the system automatically clones it on startup.
 - **Git operations:** The sync layer handles `git add/commit/push/pull` automatically.
 
