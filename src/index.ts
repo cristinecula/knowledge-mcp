@@ -22,6 +22,8 @@ import { registerUpdateTool } from './tools/update.js';
 import { registerDeleteTool } from './tools/delete.js';
 import { registerSyncTool } from './tools/sync.js';
 import { registerHistoryTools } from './tools/history.js';
+import { registerBatchGetTool } from './tools/batch-get.js';
+import { registerBatchTool } from './tools/batch.js';
 import { existsSync } from 'node:fs';
 import {
   setSyncConfig,
@@ -247,8 +249,10 @@ async function main(): Promise<void> {
   registerDeleteTool(server);
   registerSyncTool(server);
   registerHistoryTools(server);
+  registerBatchGetTool(server);
+  registerBatchTool(server);
 
-  const toolCount = isSyncEnabled() ? '11 tools registered (sync enabled)' : '11 tools registered (sync disabled)';
+  const toolCount = isSyncEnabled() ? '13 tools registered (sync enabled)' : '13 tools registered (sync disabled)';
   console.error(toolCount);
 
   // Start graph visualization server
