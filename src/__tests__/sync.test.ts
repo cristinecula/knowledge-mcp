@@ -561,6 +561,67 @@ describe('sync layer', () => {
       const result = detectConflict(local, remote);
       expect(result.action).toBe('no_change');
     });
+
+    it('should return no_change when both sides advanced but only inaccuracy differs', () => {
+      // Simulates two agents independently running propagateInaccuracy on the same subgraph.
+      // Both versions advanced (e.g., from real content changes elsewhere that bumped version),
+      // but the only difference is inaccuracy — which contentEquals intentionally ignores.
+      const local: any = {
+        type: 'fact',
+        title: 'Shared entry',
+        content: 'Same content on both sides',
+        tags: ['a'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        inaccuracy: 0.5,
+        version: 3,
+        synced_version: 1,
+      };
+      const remote: any = {
+        type: 'fact',
+        title: 'Shared entry',
+        content: 'Same content on both sides',
+        tags: ['a'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        inaccuracy: 0.3,
+        version: 2,
+      };
+
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('no_change');
+    });
+
+    it('should treat entries with different inaccuracy but same content as equal via contentEquals', () => {
+      const local: any = {
+        type: 'fact',
+        title: 'Test',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        inaccuracy: 0.12345678,
+      };
+      const remote: any = {
+        type: 'fact',
+        title: 'Test',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        inaccuracy: 0.123,
+      };
+
+      expect(contentEquals(local, remote)).toBe(true);
+    });
   });
 
   describe('link write-through (frontmatter)', () => {

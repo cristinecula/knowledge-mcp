@@ -72,6 +72,12 @@ export function detectConflict(
 
 /**
  * Check if the shared content fields of a local entry match a remote entry.
+ *
+ * Notably excludes `inaccuracy` — it's a derived signal that can diverge
+ * independently when multiple agents run propagateInaccuracy on overlapping
+ * subgraphs. Including it caused false conflicts (identical semantic content
+ * but trivially different inaccuracy from independent propagation paths or
+ * floating-point precision loss during JSON round-trips).
  */
 export function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean {
   return (
@@ -86,7 +92,6 @@ export function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean
     (local.declaration ?? null) === (remote.declaration ?? null) &&
     (local.parent_page_id ?? null) === (remote.parent_page_id ?? null) &&
     (local.deprecation_reason ?? null) === (remote.deprecation_reason ?? null) &&
-    (local.flag_reason ?? null) === (remote.flag_reason ?? null) &&
-    (local.inaccuracy ?? 0) === (remote.inaccuracy ?? 0)
+    (local.flag_reason ?? null) === (remote.flag_reason ?? null)
   );
 }
