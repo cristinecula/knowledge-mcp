@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/cristinecula/knowledge-mcp/compare/v1.1.2...v1.2.0) (2026-02-28)
+
+
+### Features
+
+* add batch_get_knowledge and batch_operations tools ([#6](https://github.com/cristinecula/knowledge-mcp/issues/6)) ([50c15ea](https://github.com/cristinecula/knowledge-mcp/commit/50c15ea110037ab3c5bebeaa6815fc4cc7af90c3))
+
 ## [1.1.2](https://github.com/cristinecula/knowledge-mcp/compare/v1.1.1...v1.1.2) (2026-02-26)
 
 
