@@ -4,8 +4,9 @@ export const INSTRUCTIONS = `
 You have access to a shared knowledge base via MCP tools:
 
 - **Search:** \`query_knowledge\` (text search, returns truncated content), \`list_knowledge\` (browse/filter, metadata only)
-- **Read:** \`get_knowledge\` (retrieve full content of an entry by ID)
+- **Read:** \`get_knowledge\` (retrieve full content of an entry by ID), \`batch_get_knowledge\` (retrieve multiple entries at once)
 - **Write:** \`store_knowledge\`, \`update_knowledge\`, \`delete_knowledge\`
+- **Batch:** \`batch_operations\` (store/update/delete/deprecate multiple entries atomically)
 - **Maintain:** \`reinforce_knowledge\`, \`deprecate_knowledge\`
 - **Sync:** \`sync_knowledge\` (git sync is recommended for team use and persistent history)
 - **History:** \`get_entry_history\`, \`get_entry_at_version\` (requires git sync)
@@ -21,6 +22,15 @@ Use it as persistent memory across sessions.
 - \`list_knowledge\` returns **metadata only** (no content). Use it to browse entries
   by type, project, scope, or status.
 - Both \`query_knowledge\` and \`get_knowledge\` auto-record access for analytics.
+
+## Batch operations
+
+- Use \`batch_get_knowledge\` to retrieve multiple entries by ID in a single call instead of
+  making multiple \`get_knowledge\` calls. Supports short ID prefixes. Returns partial results
+  (found entries + list of not-found IDs).
+- Use \`batch_operations\` to store, update, delete, or deprecate multiple entries atomically.
+  All operations succeed or all fail. Maximum 50 operations per call. Useful for bulk cleanup,
+  migrations, or creating multiple related entries at once.
 
 ## When starting a session
 
