@@ -72,6 +72,11 @@ export function detectConflict(
 
 /**
  * Check if the shared content fields of a local entry match a remote entry.
+ *
+ * Uses epsilon comparison for `inaccuracy` because entryToJSON() rounds to
+ * 3 decimal places while SQLite stores full-precision floats. Without this,
+ * values like 0.30000000000000004 (local) vs 0.3 (round-tripped) would fail
+ * strict === and cause false conflicts.
  */
 export function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean {
   return (
@@ -87,6 +92,6 @@ export function contentEquals(local: KnowledgeEntry, remote: EntryJSON): boolean
     (local.parent_page_id ?? null) === (remote.parent_page_id ?? null) &&
     (local.deprecation_reason ?? null) === (remote.deprecation_reason ?? null) &&
     (local.flag_reason ?? null) === (remote.flag_reason ?? null) &&
-    (local.inaccuracy ?? 0) === (remote.inaccuracy ?? 0)
+    Math.abs((local.inaccuracy ?? 0) - (remote.inaccuracy ?? 0)) < 0.001
   );
 }
