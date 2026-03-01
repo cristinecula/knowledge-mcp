@@ -882,10 +882,9 @@ describe('flag_reason workflow', () => {
     expect(updated.inaccuracy).toBe(0);
     expect(updated.flag_reason).toBeNull();
     expect(updated.content).toBe('Updated content with fresh numbers');
-    // Version should bump once: for the content change only
-    // (resetInaccuracy no longer bumps version — inaccuracy is invisible to conflict detection)
+    // Version should bump exactly twice: once for content change, once for resetInaccuracy
     // (flag_reason clearing is NOT a content change and does not bump version)
-    expect(updated.version).toBe(versionBeforeUpdate + 1);
+    expect(updated.version).toBe(versionBeforeUpdate + 2);
   });
 
   it('should show flag_reason in search results when set', () => {
