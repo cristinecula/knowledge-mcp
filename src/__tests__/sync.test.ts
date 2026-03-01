@@ -562,10 +562,41 @@ describe('sync layer', () => {
       expect(result.action).toBe('no_change');
     });
 
-    it('should return no_change when both sides advanced but only inaccuracy differs', () => {
-      // Simulates two agents independently running propagateInaccuracy on the same subgraph.
-      // Both versions advanced (e.g., from real content changes elsewhere that bumped version),
-      // but the only difference is inaccuracy — which contentEquals intentionally ignores.
+    it('should return no_change when both sides advanced but inaccuracy differs only by float precision', () => {
+      // Simulates the JSON round-trip precision loss: entryToJSON() rounds to 3 decimals,
+      // but SQLite stores full-precision floats. The epsilon comparison handles this.
+      const local: any = {
+        type: 'fact',
+        title: 'Shared entry',
+        content: 'Same content on both sides',
+        tags: ['a'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        inaccuracy: 0.30000000000000004,
+        version: 3,
+        synced_version: 1,
+      };
+      const remote: any = {
+        type: 'fact',
+        title: 'Shared entry',
+        content: 'Same content on both sides',
+        tags: ['a'],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        inaccuracy: 0.3,
+        version: 2,
+      };
+
+      const result = detectConflict(local, remote);
+      expect(result.action).toBe('no_change');
+    });
+
+    it('should detect conflict when both sides advanced with meaningfully different inaccuracy', () => {
+      // A real inaccuracy difference (0.5 vs 0.3) exceeds the epsilon — this is a true conflict.
       const local: any = {
         type: 'fact',
         title: 'Shared entry',
@@ -593,10 +624,10 @@ describe('sync layer', () => {
       };
 
       const result = detectConflict(local, remote);
-      expect(result.action).toBe('no_change');
+      expect(result.action).toBe('conflict');
     });
 
-    it('should treat entries with different inaccuracy but same content as equal via contentEquals', () => {
+    it('should treat float precision differences in inaccuracy as equal via contentEquals', () => {
       const local: any = {
         type: 'fact',
         title: 'Test',
@@ -621,6 +652,33 @@ describe('sync layer', () => {
       };
 
       expect(contentEquals(local, remote)).toBe(true);
+    });
+
+    it('should treat meaningfully different inaccuracy as not equal via contentEquals', () => {
+      const local: any = {
+        type: 'fact',
+        title: 'Test',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        inaccuracy: 0.5,
+      };
+      const remote: any = {
+        type: 'fact',
+        title: 'Test',
+        content: 'Content',
+        tags: [],
+        project: null,
+        scope: 'company',
+        source: 'agent',
+        status: 'active',
+        inaccuracy: 0.0,
+      };
+
+      expect(contentEquals(local, remote)).toBe(false);
     });
   });
 
