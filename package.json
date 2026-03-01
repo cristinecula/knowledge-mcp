@@ -1,6 +1,6 @@
 {
   "name": "knowledge-mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A shared agent knowledge system with brain-inspired memory decay, associative linking, and knowledge graph visualization — exposed as an MCP server.",
   "type": "module",
   "bin": {

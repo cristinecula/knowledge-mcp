@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/cristinecula/knowledge-mcp/compare/v1.2.0...v1.2.1) (2026-03-01)
+
+
+### Bug Fixes
+
+* **sync:** use epsilon comparison for inaccuracy in contentEquals to prevent false conflicts ([#7](https://github.com/cristinecula/knowledge-mcp/issues/7)) ([a3e55cf](https://github.com/cristinecula/knowledge-mcp/commit/a3e55cfc3ccf1281e5496984d01cc109d1603727))
+
 # [1.2.0](https://github.com/cristinecula/knowledge-mcp/compare/v1.1.2...v1.2.0) (2026-02-28)
 
 
